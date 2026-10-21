@@ -190,10 +190,121 @@ test("request classification only selects bounded read-only categories", () => {
     ["desktop"],
   );
   assert.deepEqual(
+    collector.categoriesForRequest("Mache WezTerm wie kitty und Dock höher"),
+    ["desktop"],
+  );
+  assert.deepEqual(
     collector.categoriesForRequest("Prüfe NixOS Flake und Generation"),
     ["flake", "project"],
   );
   assert.deepEqual(collector.categoriesForRequest("Hallo"), []);
+});
+
+test("dotfile source-of-truth links, hyprland lua, system switch revision, network adapters, and secret redaction work dynamically", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-system-context-p3-"));
+  try {
+    const configRoot = path.join(temp, "nixos-config");
+    const home = path.join(temp, "home");
+    const gen1 = path.join(temp, "system-71-link");
+    const gen2 = path.join(temp, "system-72-link");
+    mkdirSync(path.join(configRoot, "hypr"), { recursive: true });
+    mkdirSync(path.join(configRoot, "wezterm"), { recursive: true });
+    mkdirSync(path.join(configRoot, "quickshell"), { recursive: true });
+    mkdirSync(path.join(home, ".config"), { recursive: true });
+    mkdirSync(gen1, { recursive: true });
+    mkdirSync(gen2, { recursive: true });
+    writeFileSync(path.join(configRoot, "flake.nix"), "{}\n");
+    writeFileSync(path.join(configRoot, "hypr", "hyprland.lua"), "-- lua\n");
+    symlinkSync(
+      path.join(configRoot, "hypr"),
+      path.join(home, ".config", "hypr"),
+      "dir",
+    );
+    symlinkSync(
+      path.join(configRoot, "wezterm"),
+      path.join(home, ".config", "wezterm"),
+      "dir",
+    );
+    symlinkSync(
+      path.join(configRoot, "quickshell"),
+      path.join(home, ".config", "quickshell"),
+      "dir",
+    );
+    const profileLink = path.join(temp, "profile-system");
+    symlinkSync(gen1, profileLink, "dir");
+
+    const rev1 = collector.discoverConfigRoot({
+      home,
+      etcNixos: configRoot,
+      cwd: temp,
+      profileSystemPath: profileLink,
+    });
+    assert.ok(rev1.revision.includes("system-71-link"));
+
+    rmSync(profileLink);
+    symlinkSync(gen2, profileLink, "dir");
+    const rev2 = collector.discoverConfigRoot({
+      home,
+      etcNixos: configRoot,
+      cwd: temp,
+      profileSystemPath: profileLink,
+    });
+    assert.notEqual(rev1.revision, rev2.revision);
+    assert.ok(rev2.revision.includes("system-72-link"));
+
+    const collected = collector.collectSystemContext(["system", "health"], {
+      home,
+      cwd: temp,
+      etcNixos: configRoot,
+      profileSystemPath: profileLink,
+      currentSystemPath: profileLink,
+      commandRunner(command, args) {
+        if (command === "ip" && args[1] === "link") {
+          return {
+            available: true,
+            exitCode: 0,
+            stdout: JSON.stringify([
+              { ifname: "lo", operstate: "UNKNOWN", link_type: "loopback" },
+              { ifname: "wlp3s0", operstate: "UP", link_type: "ether" },
+              { ifname: "wlp0s20u2", operstate: "DOWN", link_type: "ether" },
+            ]),
+          };
+        }
+        if (command === "ip" && args[1] === "route") {
+          return {
+            available: true,
+            exitCode: 0,
+            stdout: JSON.stringify([{ dst: "default" }]),
+          };
+        }
+        return { available: true, exitCode: 0, stdout: "ok" };
+      },
+    });
+    assert.equal(collected.system.hyprlandConfigAvailable, true);
+    assert.equal(collected.system.hyprlandConfigFormat, "lua");
+    assert.deepEqual(collected.system.configLinks, {
+      hypr: "hypr",
+      quickshell: "quickshell",
+      wezterm: "wezterm",
+    });
+    assert.equal(collected.system.generation, 72);
+    assert.equal(collected.health.networkAdapters.available, true);
+    assert.deepEqual(collected.health.networkAdapters.adapters, [
+      { name: "wlp3s0", state: "UP", type: "ether" },
+      { name: "wlp0s20u2", state: "DOWN", type: "ether" },
+    ]);
+
+    const formatted = collector.formatSystemContext({
+      ...collected,
+      leaked: "api_key=super-secret-value-123456",
+      token: "sk-1234567890abcdefghijklmnop",
+    });
+    assert.equal(formatted.includes("super-secret-value-123456"), false);
+    assert.equal(formatted.includes("sk-1234567890abcdefghijklmnop"), false);
+    assert.ok(formatted.includes("[REDACTED]"));
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test("system skills are native SKILL.md files with routing descriptions", () => {

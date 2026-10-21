@@ -55,6 +55,12 @@ const MUTATING_TOOLS = new Set([
   "exec_root",
   "root_job",
   "desktop_exec",
+  "desktop_switch_workspace",
+  "desktop_focus_window",
+  "audio_set_volume",
+  "user_service",
+  "nixos_build",
+  "nixos_apply",
 ]);
 
 const MAX_RUN_EVENTS = 200;
@@ -134,7 +140,79 @@ function isValidPersistedRunRecord(record) {
   return true;
 }
 
+function normalizeRunRecord(record) {
+  if (typeof record.goal !== "string" || !record.goal) {
+    record.goal = record.title;
+  }
+  if (!Array.isArray(record.source_of_truth)) {
+    record.source_of_truth = [];
+  }
+  if (!Array.isArray(record.observations)) {
+    record.observations = [];
+  }
+  if (
+    !record.rollback ||
+    typeof record.rollback !== "object" ||
+    Array.isArray(record.rollback)
+  ) {
+    record.rollback = {
+      available: false,
+      strategy: null,
+      ref: null,
+      status: "none",
+    };
+  }
+  if (!Array.isArray(record.remaining_issues)) {
+    record.remaining_issues = [];
+  }
+  return record;
+}
+
+function addUniqueBounded(list, item, maxItems = 32) {
+  if (typeof item !== "string" || !item.trim()) return;
+  const cleaned = item.trim().slice(0, 500);
+  if (!list.includes(cleaned) && list.length < maxItems) {
+    list.push(cleaned);
+  }
+}
+
+function applyOperatorReportFields(
+  record,
+  { source_of_truth, observations, rollback, remaining_issues } = {},
+) {
+  normalizeRunRecord(record);
+  if (Array.isArray(source_of_truth)) {
+    for (const entry of source_of_truth) {
+      addUniqueBounded(record.source_of_truth, entry, 32);
+    }
+  }
+  if (Array.isArray(observations)) {
+    for (const entry of observations) {
+      addUniqueBounded(record.observations, entry, 32);
+    }
+  }
+  if (rollback && typeof rollback === "object" && !Array.isArray(rollback)) {
+    record.rollback = {
+      available: Boolean(rollback.available),
+      strategy:
+        typeof rollback.strategy === "string" ? rollback.strategy : null,
+      ref: typeof rollback.ref === "string" ? rollback.ref : null,
+      status:
+        typeof rollback.status === "string" && rollback.status
+          ? rollback.status
+          : "none",
+    };
+  }
+  if (Array.isArray(remaining_issues)) {
+    record.remaining_issues = remaining_issues
+      .filter((entry) => typeof entry === "string" && entry.trim().length > 0)
+      .slice(0, 32)
+      .map((entry) => entry.trim().slice(0, 1000));
+  }
+}
+
 export function toPublicRunSnapshot(record) {
+  normalizeRunRecord(record);
   const { pendingMessage, ...rest } = record;
   return structuredClone({
     schemaVersion: rest.schemaVersion,
@@ -144,6 +222,7 @@ export function toPublicRunSnapshot(record) {
       ? { clientSubmissionId: rest.clientSubmissionId }
       : {}),
     title: rest.title,
+    goal: rest.goal,
     createdAt: rest.createdAt,
     updatedAt: rest.updatedAt,
     revision: rest.revision,
@@ -153,6 +232,7 @@ export function toPublicRunSnapshot(record) {
     lastStep: rest.lastStep,
     queued: rest.queued === true,
     requireVerification: rest.requireVerification === true,
+    source_of_truth: [...rest.source_of_truth],
     actions: rest.actions.map((action) => ({
       actionId: action.actionId,
       toolCallId: action.toolCallId,
@@ -167,6 +247,7 @@ export function toPublicRunSnapshot(record) {
         ? { reconcileNote: action.reconcileNote }
         : {}),
     })),
+    observations: [...rest.observations],
     verification: rest.verification.map((entry) => ({
       checkId: entry.checkId,
       status: entry.status,
@@ -176,6 +257,8 @@ export function toPublicRunSnapshot(record) {
         ? { evidenceRef: entry.evidenceRef }
         : {}),
     })),
+    rollback: structuredClone(rest.rollback),
+    remaining_issues: [...rest.remaining_issues],
     result: rest.result ? structuredClone(rest.result) : null,
   });
 }
@@ -298,6 +381,7 @@ export class RunStore {
           });
           continue;
         }
+        normalizeRunRecord(parsed);
 
         if (
           !TERMINAL_RUN_STATES.has(parsed.state) &&
@@ -414,6 +498,7 @@ export class RunStore {
   }) {
     const now = new Date().toISOString();
     const runId = `run_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
+    const normalizedTitle = sanitizeTitle(title ?? message);
     const record = {
       schemaVersion: 1,
       runId,
@@ -421,7 +506,8 @@ export class RunStore {
       ...(typeof clientSubmissionId === "string" && clientSubmissionId.length > 0
         ? { clientSubmissionId }
         : {}),
-      title: sanitizeTitle(title ?? message),
+      title: normalizedTitle,
+      goal: sanitizeTitle(message ?? title, normalizedTitle),
       createdAt: now,
       updatedAt: now,
       revision: 1,
@@ -431,9 +517,18 @@ export class RunStore {
       lastStep: queued ? "queued" : "accepted",
       queued: queued === true,
       requireVerification: requireVerification === true,
-       ...(queued || true ? { pendingMessage: message } : {}),
+      ...(queued || true ? { pendingMessage: message } : {}),
+      source_of_truth: [],
       actions: [],
+      observations: [],
       verification: [],
+      rollback: {
+        available: false,
+        strategy: null,
+        ref: null,
+        status: "none",
+      },
+      remaining_issues: [],
       result: null,
       events: [],
     };
@@ -458,12 +553,16 @@ export class RunStore {
     return this.persist(record);
   }
 
-  recordToolStarted(record, { toolCallId, toolName, externalJob = false }) {
+  recordToolStarted(
+    record,
+    { toolCallId, toolName, args, externalJob = false },
+  ) {
+    normalizeRunRecord(record);
     const now = new Date().toISOString();
     const mutating = MUTATING_TOOLS.has(toolName) || externalJob === true;
     const action = {
       actionId: `act_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      toolCallId: String(toolCallId || `tc_${ record.actions.length + 1 }`),
+      toolCallId: String(toolCallId || `tc_${record.actions.length + 1}`),
       toolName: String(toolName || "unknown"),
       mutating,
       externalJob: externalJob === true,
@@ -471,6 +570,20 @@ export class RunStore {
       effectState: "executing",
     };
     record.actions.push(action);
+    if (args && typeof args === "object") {
+      if (typeof args.path === "string") {
+        addUniqueBounded(record.source_of_truth, args.path);
+      } else if (typeof args.unit === "string") {
+        addUniqueBounded(record.source_of_truth, `systemd:${args.unit}`);
+      }
+    }
+    if (
+      action.toolName === "nixos_status" ||
+      action.toolName === "nixos_build" ||
+      action.toolName === "nixos_apply"
+    ) {
+      addUniqueBounded(record.source_of_truth, "nixos:flake");
+    }
     record.updatedAt = now;
     record.revision += 1;
     if (record.state !== "CANCELLING") {
@@ -483,6 +596,7 @@ export class RunStore {
   }
 
   recordToolFinished(record, { toolCallId, toolName, isError }) {
+    normalizeRunRecord(record);
     const now = new Date().toISOString();
     const action =
       [...record.actions]
@@ -490,6 +604,7 @@ export class RunStore {
         .find((a) => a.toolCallId === toolCallId && !a.finishedAt) ??
       [...record.actions].reverse().find((a) => !a.finishedAt);
 
+    const resolvedName = String(toolName || action?.toolName || "unknown");
     if (action) {
       action.finishedAt = now;
       action.effectState = isError
@@ -497,12 +612,35 @@ export class RunStore {
         : action.mutating
           ? "applied"
           : "not_applied";
+      if (!isError && action.mutating && record.rollback.status === "none") {
+        record.rollback = {
+          available: true,
+          strategy:
+            resolvedName === "nixos_apply"
+              ? "nixos-generation-rollback"
+              : "git-or-backup-restore",
+          ref: action.actionId,
+          status: "available",
+        };
+      }
+      if (!isError && !action.mutating) {
+        addUniqueBounded(
+          record.observations,
+          `${resolvedName} completed (${action.toolCallId})`,
+        );
+      }
+    }
+    if (isError) {
+      addUniqueBounded(
+        record.remaining_issues,
+        `Tool execution failed: ${resolvedName}`,
+      );
     }
     record.updatedAt = now;
     record.revision += 1;
     record.lastStep = isError
-      ? `tool.failed:${toolName || action?.toolName || "unknown"}`
-      : `tool.completed:${toolName || action?.toolName || "unknown"}`;
+      ? `tool.failed:${resolvedName}`
+      : `tool.completed:${resolvedName}`;
     if (isError && record.state !== "CANCELLING") {
       record.stateReason = "TOOL_EXECUTION_ERROR";
     }
@@ -510,7 +648,36 @@ export class RunStore {
     return this.persist(record);
   }
 
-  recordVerification(record, { checkId, status, summary, evidenceRef }) {
+  recordVerification(
+    record,
+    {
+      checkId,
+      status,
+      summary,
+      evidenceRef,
+      source_of_truth,
+      observations,
+      rollback,
+      remaining_issues,
+    },
+  ) {
+    applyOperatorReportFields(record, {
+      source_of_truth,
+      observations,
+      rollback,
+      remaining_issues,
+    });
+    if (typeof evidenceRef === "string" && evidenceRef.length > 0) {
+      addUniqueBounded(record.source_of_truth, evidenceRef);
+    }
+    if (status === "passed" && typeof summary === "string") {
+      addUniqueBounded(record.observations, summary);
+    } else if (status === "failed" && typeof summary === "string") {
+      addUniqueBounded(
+        record.remaining_issues,
+        `Verification failed (${checkId}): ${summary}`,
+      );
+    }
     const now = new Date().toISOString();
     const existingIdx = record.verification.findIndex(
       (v) => v.checkId === checkId,
@@ -694,7 +861,24 @@ export class RunStore {
     });
   }
 
-  reconcileRun(record, { effectState, notes, evidenceRef }) {
+  reconcileRun(
+    record,
+    {
+      effectState,
+      notes,
+      evidenceRef,
+      source_of_truth,
+      observations,
+      rollback,
+      remaining_issues,
+    },
+  ) {
+    applyOperatorReportFields(record, {
+      source_of_truth,
+      observations,
+      rollback,
+      remaining_issues,
+    });
     if (record.state !== "UNCERTAIN" && record.state !== "RECONCILING") {
       const err = new Error(
         `Run ${record.runId} is in state ${record.state} and cannot be reconciled`,

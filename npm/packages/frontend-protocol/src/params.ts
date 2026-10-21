@@ -152,6 +152,26 @@ export const REQUEST_PARAM_SCHEMAS = {
       ]),
       notes: Type.Optional(Type.String({ maxLength: 1_000 })),
       evidenceRef: Type.Optional(Type.String({ maxLength: 500 })),
+      source_of_truth: Type.Optional(
+        Type.Array(Type.String({ maxLength: 500 }), { maxItems: 32 }),
+      ),
+      observations: Type.Optional(
+        Type.Array(Type.String({ maxLength: 1_000 }), { maxItems: 32 }),
+      ),
+      rollback: Type.Optional(
+        Type.Object(
+          {
+            available: Type.Boolean(),
+            strategy: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
+            ref: Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
+            status: Type.String({ maxLength: 200 }),
+          },
+          Strict,
+        ),
+      ),
+      remaining_issues: Type.Optional(
+        Type.Array(Type.String({ maxLength: 1_000 }), { maxItems: 32 }),
+      ),
     },
     Strict,
   ),
@@ -173,6 +193,26 @@ export const REQUEST_PARAM_SCHEMAS = {
       ]),
       summary: Type.String({ minLength: 1, maxLength: 1_000 }),
       evidenceRef: Type.Optional(Type.String({ maxLength: 500 })),
+      source_of_truth: Type.Optional(
+        Type.Array(Type.String({ maxLength: 500 }), { maxItems: 32 }),
+      ),
+      observations: Type.Optional(
+        Type.Array(Type.String({ maxLength: 1_000 }), { maxItems: 32 }),
+      ),
+      rollback: Type.Optional(
+        Type.Object(
+          {
+            available: Type.Boolean(),
+            strategy: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
+            ref: Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
+            status: Type.String({ maxLength: 200 }),
+          },
+          Strict,
+        ),
+      ),
+      remaining_issues: Type.Optional(
+        Type.Array(Type.String({ maxLength: 1_000 }), { maxItems: 32 }),
+      ),
     },
     Strict,
   ),

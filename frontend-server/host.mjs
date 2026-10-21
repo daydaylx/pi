@@ -1075,6 +1075,7 @@ export class PiSystemHost {
       this.runStore.recordToolStarted(record, {
         toolCallId: data?.toolCallId,
         toolName: data?.toolName,
+        args: data?.args,
       });
       this.broadcastRunEvent("run.updated", record);
       return;

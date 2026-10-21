@@ -195,6 +195,16 @@ export const RunResultSchema = Type.Object(
   Strict,
 );
 
+export const RunRollbackSchema = Type.Object(
+  {
+    available: Type.Boolean(),
+    strategy: Type.Union([Type.String(), Type.Null()]),
+    ref: Type.Union([Type.String(), Type.Null()]),
+    status: Type.String({ minLength: 1 }),
+  },
+  Strict,
+);
+
 export const RunSnapshotSchema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
@@ -202,6 +212,7 @@ export const RunSnapshotSchema = Type.Object(
     sessionId: Type.String({ minLength: 1 }),
     clientSubmissionId: OptionalString,
     title: Type.String({ minLength: 1 }),
+    goal: Type.String({ minLength: 1 }),
     createdAt: Type.String({ minLength: 1 }),
     updatedAt: Type.String({ minLength: 1 }),
     revision: Type.Integer({ minimum: 1 }),
@@ -211,8 +222,12 @@ export const RunSnapshotSchema = Type.Object(
     lastStep: Type.String({ minLength: 1 }),
     queued: Type.Boolean(),
     requireVerification: Type.Boolean(),
+    source_of_truth: Type.Array(Type.String()),
     actions: Type.Array(RunActionSchema),
+    observations: Type.Array(Type.String()),
     verification: Type.Array(RunVerificationSchema),
+    rollback: RunRollbackSchema,
+    remaining_issues: Type.Array(Type.String()),
     result: Type.Union([RunResultSchema, Type.Null()]),
   },
   Strict,

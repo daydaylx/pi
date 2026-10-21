@@ -167,8 +167,33 @@ test("RunStore persists atomic manifests, isolates corrupt files, and enforces c
     store3.reconcileRun(r1Uncertain, {
       effectState: "not_applied",
       notes: "Verified target file untouched",
+      source_of_truth: ["/etc/nixos/configuration.nix"],
+      observations: ["Target file hash unchanged"],
+      rollback: {
+        available: true,
+        strategy: "git-checkout",
+        ref: "HEAD",
+        status: "verified-clean",
+      },
+      remaining_issues: ["Requires manual resume confirmation"],
     });
     assert.equal(r1Uncertain.state, "RESUMABLE");
+    assert.equal(r1Uncertain.goal, "Check NetworkManager status");
+    assert.deepEqual(r1Uncertain.source_of_truth, [
+      "/etc/nixos/configuration.nix",
+    ]);
+    assert.deepEqual(r1Uncertain.observations, [
+      "Target file hash unchanged",
+    ]);
+    assert.deepEqual(r1Uncertain.rollback, {
+      available: true,
+      strategy: "git-checkout",
+      ref: "HEAD",
+      status: "verified-clean",
+    });
+    assert.deepEqual(r1Uncertain.remaining_issues, [
+      "Requires manual resume confirmation",
+    ]);
   } finally {
     rmSync(temp, { recursive: true, force: true });
   }

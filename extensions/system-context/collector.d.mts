@@ -41,10 +41,17 @@ export function collectSystemContext(
   options?: SystemContextOptions,
 ): SystemContext;
 export function formatSystemContext(value: SystemContext): string;
+export function redactContextSecrets(value: string): string;
+export function discoverDotfileTargets(options?: {
+  home?: string;
+  configRoot?: string;
+}): Record<string, string>;
 export function discoverConfigRoot(options?: {
   home?: string;
   etcNixos?: string;
   cwd?: string;
+  currentSystemPath?: string;
+  profileSystemPath?: string;
 }):
   | {
       path: string;
