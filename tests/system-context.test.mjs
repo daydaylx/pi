@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHarness } from "./shared/harness.mjs";
-import { importModule } from "./shared/jiti-loader.mjs";
+import { importModule, npmModuleFile } from "./shared/jiti-loader.mjs";
 
 const collector = await importModule("extensions/system-context/collector.mjs");
 const extension = await importModule("extensions/system-context/index.ts");
@@ -439,4 +439,122 @@ async function main() {
   if (failed.length) process.exitCode = 1;
 }
 
+// Exercise the installed runtime loader and hook dispatcher, not just file text.
+async function testEffectivePrompt() {
+  const {
+    DefaultResourceLoader,
+    SettingsManager,
+    ExtensionRunner,
+    SessionManager,
+  } = await import(
+    npmModuleFile("@earendil-works/pi-coding-agent", "dist/index.js")
+  );
+  const { buildSystemPrompt } = await import(
+    npmModuleFile(
+      "@earendil-works/pi-coding-agent",
+      "dist/core/system-prompt.js",
+    )
+  );
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-effective-prompt-"));
+  try {
+    const cwd = path.join(temp, "workspace");
+    const agentDir = path.join(temp, "agent");
+    mkdirSync(cwd);
+    mkdirSync(agentDir);
+    writeFileSync(path.join(temp, "AGENTS.md"), "ANCESTOR_SENTINEL");
+    writeFileSync(path.join(cwd, "CLAUDE.md"), "PROJECT_SENTINEL");
+    writeFileSync(path.join(agentDir, "AGENTS.md"), "GLOBAL_SENTINEL");
+    writeFileSync(
+      path.join(agentDir, "APPEND_SYSTEM.md"),
+      "COMMUNICATION_SENTINEL",
+    );
+    for (const profile of ["system", "project"]) {
+      const loader = new DefaultResourceLoader({
+        cwd,
+        agentDir,
+        settingsManager: SettingsManager.inMemory({ packages: [] }),
+        noContextFiles: profile === "system",
+        noThemes: true,
+        noPromptTemplates: true,
+        extensionFactories: [
+          (pi) =>
+            extension.registerSystemContext(pi, {
+              profile: () => profile,
+              collect: () => ({
+                system: { configuration: { revision: "fixture" } },
+              }),
+              discoverConfig: () => ({ revision: "fixture" }),
+              repoContext: () => undefined,
+            }),
+        ],
+      });
+      await loader.reload();
+      const loaded = loader.getExtensions();
+      assert.deepEqual(loaded.errors, []);
+      const runner = new ExtensionRunner(
+        loaded.extensions,
+        loaded.runtime,
+        cwd,
+        SessionManager.inMemory(cwd),
+        undefined,
+      );
+      const errors = [];
+      runner.onError((error) => errors.push(error));
+      const base = {
+        cwd,
+        selectedTools: ["read", "bash"],
+        contextFiles: loader.getAgentsFiles().agentsFiles,
+        appendSystemPrompt: loader.getAppendSystemPrompt().join("\n"),
+        skills: loader.getSkills().skills,
+      };
+      for (const mode of ["tui", "rpc"]) {
+        runner.setUIContext(runner.getUIContext(), mode);
+        for (const trigger of [
+          { messageType: "user", prompt: "Prüfe meine NixOS-Konfiguration" },
+          { messageType: "user", prompt: "Gibt es fehlerhafte Einstellungen?" },
+          {
+            messageType: "user",
+            prompt: "Was bedeutet services.openssh.enable?",
+          },
+          { messageType: "custom", message: {} },
+        ]) {
+          const result = await runner.emitBeforeAgentStart(trigger, base);
+          const prompt = buildSystemPrompt(result.systemPromptOptions);
+          assert.match(prompt, /COMMUNICATION_SENTINEL/);
+          if (profile === "system") {
+            assert.equal(prompt.split("[SYSTEM WORK CONTRACT]").length - 1, 1);
+            assert.doesNotMatch(
+              prompt,
+              /GLOBAL_SENTINEL|PROJECT_SENTINEL|ANCESTOR_SENTINEL/,
+            );
+            assert.doesNotMatch(
+              prompt,
+              /SYSTEM ACCESS|Only readonly|host asks for confirmation/,
+            );
+            assert.match(prompt, /Anschlussfragen setzen die Untersuchung/);
+            assert.match(prompt, /kleine Informationsfrage/);
+            assert.match(
+              prompt,
+              /teilweise erledigt wegen nachgewiesener Blockade/,
+            );
+          } else {
+            assert.match(prompt, /GLOBAL_SENTINEL/);
+            assert.doesNotMatch(prompt, /SYSTEM WORK CONTRACT/);
+          }
+        }
+      }
+      assert.deepEqual(errors, []);
+    }
+    results.push(
+      "runtime effective prompt: TUI/RPC, follow-ups, custom runs, context isolation, project parity: PASS",
+    );
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+}
+try {
+  await testEffectivePrompt();
+} catch (error) {
+  results.push(`runtime effective prompt: FAIL — ${error.stack}`);
+}
 await main();
