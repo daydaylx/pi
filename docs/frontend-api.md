@@ -31,7 +31,7 @@ per connection. Runtime schemas and fixtures are exported by
 V1 defines `sessions`, `session-management`, `messages`, `streaming`, `tool-calls`, `workflow`,
 `tasks`, `subagents`, `permissions`, `verification`, `changes`, `lsp`, `models`,
 `thinking`, `notifications`, `configuration`, `extension-ui`, `host-epoch`,
-`approval-envelope` and `paged-messages`. A frontend must
+`approval-envelope`, `paged-messages` and `runs` (on `PiSystemHost`). A frontend must
 disable or hide a feature when its capability is absent; clients without the
 `session-management` capability show session management actions as disabled
 ("nicht verfügbar").
@@ -59,6 +59,7 @@ may therefore be present even when a particular optional command returns
 | Permissions    | `permission.list`, `permission.set`                                                                      |
 | Commands       | `command.list`, `command.invoke`                                                                         |
 | State/services | `verification.run`, `changes.list`, `configuration.get`, `ui.respond`                                    |
+| Runs (Host)    | `run.submit`, `run.current`, `run.get`, `run.list`, `run.cancel`, `run.events`, `run.reconcile`, `run.resume`, `run.verify` |
 
 Session IDs are opaque. `session.list` never returns a session filename, and
 `session.open` accepts only an ID previously issued by the server.
@@ -159,7 +160,7 @@ payloads.
 
 - Wire major 1 is required for this contract generation.
 - The bundled server accepts an explicit allowlist of Pi runtime lines: 0.84.x,
-  1.0.x and 1.2.x. Another runtime is rejected during the handshake with
+  1.0.x, 1.2.x and 1.3.x. Another runtime is rejected during the handshake with
   `PI_START_FAILED`, a message naming the detected version and the supported
   lines, and `retryable: false`, instead of being reported under a supported
   version. Adding a line requires a verified RPC contract and tests.

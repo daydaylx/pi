@@ -119,9 +119,12 @@ vorhandene Installation.
 - Reconnect erhält einen aktuellen Snapshot, aber keinen Replay-Puffer für
   verpasste Stream-Events. Ein Client muss Nachrichten bei Bedarf über
   `session.messages` nachladen.
-- Pi-Sitzungen sind persistent; ein separates dauerhaftes Run-/Job-Manifest,
-  Crash-Recovery und Statusabgleich gestarteter externer Jobs fehlen. Die
-  Host-Epoch gilt nur für den jeweiligen Prozess und bietet keinen Replay-Puffer.
+- **Dauerhafte Auftragsverwaltung (`RunStore` / Capability `runs`)**:
+  - Der Host verwaltet dauerhafte Auftragsmanifeste unter `profile-state/system/runs/<runId>.json` (Modus `0600`, atomare Writes mit `fsync` + `rename` in einem `0700`-Verzeichnis), ohne Chat-Nachrichten aus dem Session-Store zu duplizieren.
+  - Unterstützte Methoden: `run.submit` (idempotent über `clientSubmissionId`, lehnt parallele Starts standardmäßig mit `RUN_BUSY` ab oder reiht sie bei `queue: true` serialisiert ein), `run.current`, `run.get`, `run.list`, `run.cancel`, `run.events` (Revisions-Nachladung ab `afterRevision`), `run.reconcile`, `run.resume` und `run.verify`.
+  - Unterstützte Events: `run.created`, `run.updated`, `run.input_required`, `run.settled`, `run.reconcile_required`.
+  - **Crash- & Neustart-Reconcile**: Beim Start mit neuer `hostEpoch` oder bei Backend-Abbruch (`core.disconnected`) werden nicht-terminale Runs automatisch als `UNCERTAIN` (`HOST_RESTARTED_DURING_ACTIVE_RUN` bzw. `BACKEND_DISCONNECTED`) markiert. Unterbrochene Befehle werden niemals blind erneut ausgeführt; ein `run.resume` ist erst zulässig, nachdem `run.reconcile` den Zustand auf `not_applied` (`RESUMABLE`) geklärt hat. Bei `effectState: "unknown"` geht der Run nach `BLOCKED`.
+  - **Verifikationssperre**: `agent.settled` (`aborted: false`) führt bei fehlgeschlagenen Tool-Aufrufen zu `FAILED` und hält Runs mit `requireVerification: true` in `VERIFYING`, bis ein positiver Nachweis (`run.verify` / `verification.changed`) vorliegt.
 - `pis` als interaktive TUI und der RPC-Host nutzen getrennte
   Session-Verzeichnisse. Eine Attach-/Handoff-Funktion existiert nicht; Verlauf
   und Sessionauswahl werden nicht automatisch zwischen den beiden Profilen

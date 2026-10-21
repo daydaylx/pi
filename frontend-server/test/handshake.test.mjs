@@ -81,7 +81,7 @@ test("rejects an incompatible installed Pi version", async () => {
   assert.equal(hello.error.code, "PI_START_FAILED");
   assert.equal(
     hello.error.message,
-    "Installed Pi 0.85.0 is not supported by frontend protocol v1 (supported: 0.84.x, 1.0.x, 1.2.x)",
+    "Installed Pi 0.85.0 is not supported by frontend protocol v1 (supported: 0.84.x, 1.0.x, 1.2.x, 1.3.x)",
   );
   assert.equal(hello.error.retryable, false);
   server.child.kill("SIGTERM");

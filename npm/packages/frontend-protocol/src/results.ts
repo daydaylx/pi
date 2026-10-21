@@ -119,6 +119,144 @@ const PermissionEntry = Type.Object(
   Strict,
 );
 
+export const RunStateSchema = Type.Union([
+  Type.Literal("ACCEPTED"),
+  Type.Literal("INVESTIGATING"),
+  Type.Literal("EXECUTING"),
+  Type.Literal("VERIFYING"),
+  Type.Literal("WAITING_INPUT"),
+  Type.Literal("CANCELLING"),
+  Type.Literal("UNCERTAIN"),
+  Type.Literal("RECONCILING"),
+  Type.Literal("RESUMABLE"),
+  Type.Literal("SUCCEEDED"),
+  Type.Literal("FAILED"),
+  Type.Literal("BLOCKED"),
+  Type.Literal("CANCELLED"),
+]);
+
+export const RunActionSchema = Type.Object(
+  {
+    actionId: Type.String({ minLength: 1 }),
+    toolCallId: Type.String({ minLength: 1 }),
+    toolName: Type.String({ minLength: 1 }),
+    mutating: Type.Boolean(),
+    startedAt: Type.String({ minLength: 1 }),
+    finishedAt: OptionalString,
+    effectState: Type.Union([
+      Type.Literal("intended"),
+      Type.Literal("executing"),
+      Type.Literal("applied"),
+      Type.Literal("not_applied"),
+      Type.Literal("failed"),
+      Type.Literal("unknown"),
+    ]),
+    reconcileNote: OptionalString,
+  },
+  Strict,
+);
+
+export const RunVerificationSchema = Type.Object(
+  {
+    checkId: Type.String({ minLength: 1 }),
+    status: Type.Union([
+      Type.Literal("passed"),
+      Type.Literal("failed"),
+      Type.Literal("pending"),
+    ]),
+    summary: Type.String({ minLength: 1 }),
+    recordedAt: Type.String({ minLength: 1 }),
+    evidenceRef: OptionalString,
+  },
+  Strict,
+);
+
+export const RunResultSchema = Type.Object(
+  {
+    outcome: Type.Union([
+      Type.Literal("succeeded"),
+      Type.Literal("failed"),
+      Type.Literal("blocked"),
+      Type.Literal("cancelled"),
+      Type.Literal("uncertain"),
+    ]),
+    partial: Type.Boolean(),
+    errorCode: OptionalString,
+    message: Type.String(),
+    cancelScope: Type.Optional(
+      Type.Union([
+        Type.Literal("queued_removed"),
+        Type.Literal("turn_and_tools_stopped"),
+        Type.Literal("turn_aborted_external_effect_uncertain"),
+      ]),
+    ),
+    verificationRefs: Type.Array(Type.String()),
+  },
+  Strict,
+);
+
+export const RunSnapshotSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    runId: Type.String({ minLength: 1 }),
+    sessionId: Type.String({ minLength: 1 }),
+    clientSubmissionId: OptionalString,
+    title: Type.String({ minLength: 1 }),
+    createdAt: Type.String({ minLength: 1 }),
+    updatedAt: Type.String({ minLength: 1 }),
+    revision: Type.Integer({ minimum: 1 }),
+    hostEpoch: Type.String({ minLength: 1 }),
+    state: RunStateSchema,
+    stateReason: Type.String({ minLength: 1 }),
+    lastStep: Type.String({ minLength: 1 }),
+    queued: Type.Boolean(),
+    requireVerification: Type.Boolean(),
+    actions: Type.Array(RunActionSchema),
+    verification: Type.Array(RunVerificationSchema),
+    result: Type.Union([RunResultSchema, Type.Null()]),
+  },
+  Strict,
+);
+
+export const RunSummarySchema = Type.Object(
+  {
+    runId: Type.String({ minLength: 1 }),
+    sessionId: Type.String({ minLength: 1 }),
+    clientSubmissionId: OptionalString,
+    title: Type.String({ minLength: 1 }),
+    createdAt: Type.String({ minLength: 1 }),
+    updatedAt: Type.String({ minLength: 1 }),
+    revision: Type.Integer({ minimum: 1 }),
+    state: RunStateSchema,
+    stateReason: Type.String({ minLength: 1 }),
+    lastStep: Type.String({ minLength: 1 }),
+    queued: Type.Boolean(),
+  },
+  Strict,
+);
+
+export const RunEventEntrySchema = Type.Object(
+  {
+    revision: Type.Integer({ minimum: 1 }),
+    timestamp: Type.String({ minLength: 1 }),
+    event: Type.String({ minLength: 1 }),
+    state: RunStateSchema,
+    stateReason: Type.String({ minLength: 1 }),
+    lastStep: Type.String({ minLength: 1 }),
+  },
+  Strict,
+);
+
+const CorruptedRunEntrySchema = Type.Object(
+  {
+    runId: Type.String({ minLength: 1 }),
+    fileName: Type.String({ minLength: 1 }),
+    reason: Type.String({ minLength: 1 }),
+    detectedAt: Type.String({ minLength: 1 }),
+  },
+  Strict,
+);
+
 export const REQUEST_RESULT_SCHEMAS = {
   "system.ping": Type.Object(
     {
@@ -210,6 +348,50 @@ export const REQUEST_RESULT_SCHEMAS = {
     Strict,
   ),
   "ui.respond": Type.Object({ delivered: Type.Literal(true) }, Strict),
+  "run.submit": Type.Object(
+    {
+      run: RunSnapshotSchema,
+      deduplicated: Type.Boolean(),
+    },
+    Strict,
+  ),
+  "run.current": Type.Object(
+    {
+      run: Type.Union([RunSnapshotSchema, Type.Null()]),
+    },
+    Strict,
+  ),
+  "run.get": Type.Object({ run: RunSnapshotSchema }, Strict),
+  "run.list": Type.Object(
+    {
+      runs: Type.Array(RunSummarySchema),
+      nextCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+      corrupted: Type.Optional(Type.Array(CorruptedRunEntrySchema)),
+    },
+    Strict,
+  ),
+  "run.cancel": Type.Object(
+    {
+      run: RunSnapshotSchema,
+      cancelScope: Type.Union([
+        Type.Literal("queued_removed"),
+        Type.Literal("turn_abort_requested"),
+        Type.Literal("already_terminal"),
+      ]),
+    },
+    Strict,
+  ),
+  "run.events": Type.Object(
+    {
+      run: RunSnapshotSchema,
+      events: Type.Array(RunEventEntrySchema),
+      currentRevision: Type.Integer({ minimum: 1 }),
+    },
+    Strict,
+  ),
+  "run.reconcile": Type.Object({ run: RunSnapshotSchema }, Strict),
+  "run.resume": Type.Object({ run: RunSnapshotSchema }, Strict),
+  "run.verify": Type.Object({ run: RunSnapshotSchema }, Strict),
 } as const;
 
 const validators = Object.fromEntries(

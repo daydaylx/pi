@@ -167,7 +167,7 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
     }
     if (request.type === "prompt") {
       if (process.env.FAKE_PI_PROMPT_LOG) {
-        appendFileSync(process.env.FAKE_PI_PROMPT_LOG, `${request.id}\n`);
+        appendFileSync(process.env.FAKE_PI_PROMPT_LOG, `${request.id}:${request.message ?? ""}\n`);
       }
       if (process.env.FAKE_PI_HANG_PROMPT === "1") return;
       send({ type: "agent_start" });
@@ -177,7 +177,61 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
         success: true,
         data: {},
       });
+      if (request.message?.includes("[TOOL_FAIL]")) {
+        setTimeout(() => {
+          send({
+            type: "tool_execution_start",
+            toolCallId: "tc-fail-1",
+            toolName: "bash",
+          });
+          send({
+            type: "tool_execution_end",
+            toolCallId: "tc-fail-1",
+            toolName: "bash",
+            isError: true,
+          });
+          send({ type: "agent_settled", aborted: false });
+        }, 80);
+        return;
+      }
+      if (request.message?.includes("[TOOL_HANG]")) {
+        setTimeout(() => {
+          send({
+            type: "tool_execution_start",
+            toolCallId: "tc-hang-1",
+            toolName: "bash",
+          });
+        }, 50);
+        return;
+      }
+      if (request.message?.includes("[TOOL_OK]")) {
+        setTimeout(() => {
+          send({
+            type: "tool_execution_start",
+            toolCallId: "tc-ok-1",
+            toolName: "bash",
+          });
+          send({
+            type: "tool_execution_end",
+            toolCallId: "tc-ok-1",
+            toolName: "bash",
+            isError: false,
+          });
+          send({ type: "agent_settled", aborted: false });
+        }, 80);
+        return;
+      }
       setTimeout(() => send({ type: "agent_settled" }), 350);
+      return;
+    }
+    if (request.type === "abort") {
+      send({
+        id: request.id,
+        type: "response",
+        success: true,
+        data: {},
+      });
+      setTimeout(() => send({ type: "agent_settled", aborted: true }), 40);
       return;
     }
     send({

@@ -475,3 +475,114 @@ test("validates session management parameters and results strictly", () => {
     false,
   );
 });
+
+test("exposes runs capability and validates run.* methods, results and events", () => {
+  assert.ok(CAPABILITIES.includes("runs"));
+  for (const method of [
+    "run.submit",
+    "run.current",
+    "run.get",
+    "run.list",
+    "run.cancel",
+    "run.events",
+    "run.reconcile",
+    "run.resume",
+    "run.verify",
+  ]) {
+    assert.ok(isKnownRequestMethod(method), method);
+  }
+  for (const event of [
+    "run.created",
+    "run.updated",
+    "run.input_required",
+    "run.settled",
+    "run.reconcile_required",
+  ]) {
+    assert.ok(isKnownEventName(event), event);
+  }
+
+  assert.equal(
+    isValidRequestParams("run.submit", {
+      message: "Check service status",
+      title: "Service Check",
+      clientSubmissionId: "sub-001",
+      requireVerification: true,
+      queue: false,
+    }),
+    true,
+  );
+  assert.equal(isValidRequestParams("run.submit", { message: "" }), false);
+  assert.equal(
+    isValidRequestParams("run.submit", {
+      message: "ok",
+      clientSubmissionId: "bad/id",
+    }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("run.get", { runId: "run_123" }),
+    true,
+  );
+  assert.equal(
+    isValidRequestParams("run.get", { clientSubmissionId: "sub-123" }),
+    true,
+  );
+  assert.equal(isValidRequestParams("run.get", {}), false);
+
+  const sampleSnapshot = {
+    schemaVersion: 1,
+    runId: "run_abc123",
+    sessionId: "sess_1",
+    clientSubmissionId: "sub-001",
+    title: "Service Check",
+    createdAt: "2026-10-21T22:00:00.000Z",
+    updatedAt: "2026-10-21T22:00:01.000Z",
+    revision: 2,
+    hostEpoch: "epoch-1",
+    state: "EXECUTING",
+    stateReason: "TOOL_EXECUTING",
+    lastStep: "tool.started:bash",
+    queued: false,
+    requireVerification: true,
+    actions: [
+      {
+        actionId: "act_1",
+        toolCallId: "tc_1",
+        toolName: "bash",
+        mutating: true,
+        startedAt: "2026-10-21T22:00:01.000Z",
+        effectState: "executing",
+      },
+    ],
+    verification: [],
+    result: null,
+  };
+
+  assert.equal(
+    isValidRequestResult("run.submit", {
+      run: sampleSnapshot,
+      deduplicated: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isValidRequestResult("run.current", { run: sampleSnapshot }),
+    true,
+  );
+  assert.equal(isValidRequestResult("run.current", { run: null }), true);
+  assert.equal(
+    isValidEventData("run.created", { run: sampleSnapshot }),
+    true,
+  );
+  assert.equal(
+    isValidEventData("run.input_required", {
+      run: sampleSnapshot,
+      uiRequestId: "ui-1",
+    }),
+    true,
+  );
+  assert.equal(
+    isValidEventData("run.reconcile_required", { run: sampleSnapshot }),
+    true,
+  );
+});

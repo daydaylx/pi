@@ -22,6 +22,7 @@ export const CAPABILITIES = [
   "host-epoch",
   "approval-envelope",
   "paged-messages",
+  "runs",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 export const isKnownCapability = (value: string): value is Capability =>
@@ -58,6 +59,15 @@ export const REQUEST_METHODS = [
   "changes.list",
   "configuration.get",
   "ui.respond",
+  "run.submit",
+  "run.current",
+  "run.get",
+  "run.list",
+  "run.cancel",
+  "run.events",
+  "run.reconcile",
+  "run.resume",
+  "run.verify",
 ] as const;
 export type RequestMethod = (typeof REQUEST_METHODS)[number];
 export const isKnownRequestMethod = (value: string): value is RequestMethod =>
@@ -87,6 +97,11 @@ export const EVENT_NAMES = [
   "core.disconnected",
   "core.reconnected",
   "error",
+  "run.created",
+  "run.updated",
+  "run.input_required",
+  "run.settled",
+  "run.reconcile_required",
 ] as const;
 export type EventName = (typeof EVENT_NAMES)[number];
 export const isKnownEventName = (value: string): value is EventName =>
@@ -107,6 +122,10 @@ export const ERROR_CODES = [
   "TOOL_FAILED",
   "PERMISSION_DENIED",
   "SESSION_BUSY",
+  "RUN_NOT_FOUND",
+  "RUN_BUSY",
+  "RUN_CONFLICT",
+  "RUN_CORRUPT",
   "RESULT_TOO_LARGE",
   "PROVIDER_ERROR",
   "INTERNAL_ERROR",

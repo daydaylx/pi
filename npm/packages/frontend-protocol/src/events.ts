@@ -2,7 +2,7 @@ import Type from "typebox";
 import Schema from "typebox/schema";
 import type { EventName } from "./constants.js";
 import { ProtocolErrorSchema } from "./schemas.js";
-import { PublicMessageSchema } from "./results.js";
+import { PublicMessageSchema, RunSnapshotSchema } from "./results.js";
 import { StatePatchV1Schema, StateSnapshotV1Schema } from "./state-schemas.js";
 
 const Strict = { additionalProperties: false } as const;
@@ -101,6 +101,17 @@ export const EVENT_DATA_SCHEMAS = {
   "core.disconnected": ErrorData,
   "core.reconnected": Empty,
   error: ErrorData,
+  "run.created": Type.Object({ run: RunSnapshotSchema }, Strict),
+  "run.updated": Type.Object({ run: RunSnapshotSchema }, Strict),
+  "run.input_required": Type.Object(
+    {
+      run: RunSnapshotSchema,
+      uiRequestId: NonEmptyString,
+    },
+    Strict,
+  ),
+  "run.settled": Type.Object({ run: RunSnapshotSchema }, Strict),
+  "run.reconcile_required": Type.Object({ run: RunSnapshotSchema }, Strict),
 } as const;
 
 const validators = Object.fromEntries(

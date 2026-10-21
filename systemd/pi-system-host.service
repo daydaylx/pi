@@ -10,20 +10,22 @@ RestartSec=2s
 TimeoutStopSec=8s
 RuntimeDirectory=pi-system-host
 RuntimeDirectoryMode=0700
+UMask=0077
+KeyringMode=private
+LimitCORE=0
 Environment=PI_CODING_AGENT_DIR=%h/.pi/agent
 Environment=PI_SYSTEM_HOST_RUNTIME_DIR=%t
 Environment=TMPDIR=%h/.pi/agent/profile-state/system/tmp
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-ProtectHome=read-only
-RestrictSUIDSGID=true
-LockPersonality=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=%h/.pi/agent %h/nixos-config
+# Note on systemd --user privilege boundaries (ADR-017 / P2.6):
+# In a non-root user manager (UID 1000), mount-namespace directives
+# (ProtectSystem, ProtectHome, PrivateTmp, ProtectKernel*, ReadWritePaths)
+# force CLONE_NEWUSER (unmapping UID 0), and seccomp directives
+# (RestrictSUIDSGID, LockPersonality, RestrictAddressFamilies) force
+# PR_SET_NO_NEW_PRIVS=1, both of which block /run/wrappers/bin/sudo for the
+# whitelisted nixos-agent-helper commands. Isolation is therefore enforced via
+# UMask=0077, KeyringMode=private, LimitCORE=0, private TMPDIR/RuntimeDirectory,
+# cgroup limits below, host.mjs env/path checks, and strict sudoers whitelisting.
+NoNewPrivileges=false
 MemoryMax=1G
 CPUQuota=200%
 TasksMax=128

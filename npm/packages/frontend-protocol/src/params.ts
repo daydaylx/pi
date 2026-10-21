@@ -11,6 +11,12 @@ const SessionManagementId = Type.String({
   maxLength: 128,
   pattern: "^[A-Za-z0-9_-]+$",
 });
+const RunId = SessionManagementId;
+const SubmissionId = Type.String({
+  minLength: 1,
+  maxLength: 128,
+  pattern: "^[A-Za-z0-9_.:-]+$",
+});
 
 export const REQUEST_PARAM_SCHEMAS = {
   "system.ping": Empty,
@@ -99,6 +105,77 @@ export const REQUEST_PARAM_SCHEMAS = {
       Strict,
     ),
   ]),
+  "run.submit": Type.Object(
+    {
+      message: Message,
+      title: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+      clientSubmissionId: Type.Optional(SubmissionId),
+      requireVerification: Type.Optional(Type.Boolean()),
+      queue: Type.Optional(Type.Boolean()),
+    },
+    Strict,
+  ),
+  "run.current": Empty,
+  "run.get": Type.Union([
+    Type.Object({ runId: RunId }, Strict),
+    Type.Object({ clientSubmissionId: SubmissionId }, Strict),
+  ]),
+  "run.list": Type.Object(
+    {
+      sessionId: Type.Optional(Id),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+      before: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    },
+    Strict,
+  ),
+  "run.cancel": Type.Object(
+    {
+      runId: Type.Optional(RunId),
+      reason: Type.Optional(Type.String({ maxLength: 500 })),
+    },
+    Strict,
+  ),
+  "run.events": Type.Object(
+    {
+      runId: RunId,
+      afterRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+    },
+    Strict,
+  ),
+  "run.reconcile": Type.Object(
+    {
+      runId: RunId,
+      effectState: Type.Union([
+        Type.Literal("not_applied"),
+        Type.Literal("applied"),
+        Type.Literal("unknown"),
+      ]),
+      notes: Type.Optional(Type.String({ maxLength: 1_000 })),
+      evidenceRef: Type.Optional(Type.String({ maxLength: 500 })),
+    },
+    Strict,
+  ),
+  "run.resume": Type.Object(
+    {
+      runId: RunId,
+      message: Type.Optional(Message),
+    },
+    Strict,
+  ),
+  "run.verify": Type.Object(
+    {
+      runId: RunId,
+      checkId: SessionManagementId,
+      status: Type.Union([
+        Type.Literal("passed"),
+        Type.Literal("failed"),
+        Type.Literal("pending"),
+      ]),
+      summary: Type.String({ minLength: 1, maxLength: 1_000 }),
+      evidenceRef: Type.Optional(Type.String({ maxLength: 500 })),
+    },
+    Strict,
+  ),
 } as const;
 
 const validators = Object.fromEntries(

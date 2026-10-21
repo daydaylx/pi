@@ -14,9 +14,16 @@ import {
   isRequest,
   isValidEventData,
   isValidRequestParams,
+  isValidRequestResult,
   negotiateProtocolVersion,
   protocolError,
 } from "../npm/packages/frontend-protocol/dist/index.js";
+import {
+  ACTIVE_EXECUTION_STATES,
+  RunStore,
+  TERMINAL_RUN_STATES,
+  toPublicRunSnapshot,
+} from "./runs.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_FRONTEND = path.join(ROOT, "bin", "pi-frontend");
@@ -234,7 +241,8 @@ function ensureProfileDirectories(agentDir) {
   const system = path.join(root, "system");
   const workspace = path.join(system, "workspace");
   const sessions = path.join(system, "host-sessions");
-  for (const directory of [root, system, workspace, sessions]) {
+  const runs = path.join(system, "runs");
+  for (const directory of [root, system, workspace, sessions, runs]) {
     try {
       const stats = lstatSync(directory);
       if (stats.isSymbolicLink() || !stats.isDirectory()) {
@@ -253,7 +261,7 @@ function ensureProfileDirectories(agentDir) {
     const stats = lstatSync(directory);
     if ((stats.mode & 0o077) !== 0) chmodSync(directory, 0o700);
   }
-  return { agentDir: canonicalAgentDir, workspace, sessions };
+  return { agentDir: canonicalAgentDir, workspace, sessions, runs };
 }
 
 async function removeStaleSocket(socketPath) {
@@ -380,6 +388,8 @@ export class PiSystemHost {
     this.pending = new Map();
     this.pendingUi = new Map();
     this.hostEpoch = undefined;
+    this.runStore = undefined;
+    this.currentRunId = undefined;
     this.state = undefined;
     this.activeRun = false;
     this.uncertainRun = false;
@@ -390,6 +400,19 @@ export class PiSystemHost {
 
   async start() {
     this.hostEpoch = randomUUID();
+    this.runStore = new RunStore({
+      runsDir: this.profile.runs,
+      hostEpoch: this.hostEpoch,
+    });
+    const reconciledOnStartup = this.runStore.loadAndReconcileStartup(
+      this.hostEpoch,
+    );
+    if (
+      reconciledOnStartup.length > 0 ||
+      this.runStore.getActiveOrBlockingRun()?.state === "UNCERTAIN"
+    ) {
+      this.uncertainRun = true;
+    }
     await removeStaleSocket(this.socketPath);
     this.ready = new Promise((resolve, reject) => {
       this.readyResolve = resolve;
@@ -508,7 +531,10 @@ export class PiSystemHost {
       if (!request) return;
       if (request.timer) clearTimeout(request.timer);
       this.pending.delete(frame.id);
-      if (request.internalUi) {
+      if (request.internalUi || request.internalRun) {
+        if (request.internalRun && request.runId) {
+          this.handleInternalRunBackendResponse(request, frame);
+        }
         return;
       }
       request.client.inflight.delete(request.clientId);
@@ -527,13 +553,19 @@ export class PiSystemHost {
         }
       }
       if (request.method === "session.current" && frame.ok) {
-        if (frame.result?.isStreaming === false && this.pendingUi.size === 0) {
+        const hasUncertainRunRecord =
+          this.runStore?.getActiveOrBlockingRun()?.state === "UNCERTAIN";
+        if (
+          frame.result?.isStreaming === false &&
+          this.pendingUi.size === 0 &&
+          !hasUncertainRunRecord
+        ) {
           this.activeRun = false;
           this.uncertainRun = false;
           this.clearPromptReservation();
         } else if (frame.result?.isStreaming === true) {
           this.activeRun = true;
-          this.uncertainRun = false;
+          if (!hasUncertainRunRecord) this.uncertainRun = false;
           this.clearPromptReservation();
         }
       }
@@ -591,6 +623,7 @@ export class PiSystemHost {
       if (!client.ready) continue;
       this.sendClientEvent(client, frame.event, eventData, frame.sessionId);
     }
+    this.handleRunLifecycleEvent(frame.event, eventData);
   }
 
   trackUiRequest(id, data) {
@@ -647,6 +680,39 @@ export class PiSystemHost {
       });
     }
     this.updateRunState();
+    const record = this.getCurrentOrBlockingRun();
+    if (record && record.state === "WAITING_INPUT") {
+      if (outcome === "answered") {
+        const nextState = record.actions.some((a) => a.mutating)
+          ? "EXECUTING"
+          : "INVESTIGATING";
+        this.runStore.transition(record, {
+          state: nextState,
+          stateReason: "USER_INPUT_RECEIVED",
+          lastStep: `ui.answered:${id}`,
+          eventName: "run.updated",
+        });
+        this.broadcastRunEvent("run.updated", record);
+      } else if (outcome === "expired") {
+        this.runStore.transition(record, {
+          state: "BLOCKED",
+          stateReason: "APPROVAL_EXPIRED",
+          lastStep: `ui.expired:${id}`,
+          result: {
+            outcome: "blocked",
+            partial: record.actions.some((a) => a.effectState === "applied"),
+            errorCode: "PERMISSION_DENIED",
+            message: "Required user confirmation expired before response",
+            verificationRefs: [],
+          },
+          eventName: "run.settled",
+        });
+        if (this.currentRunId === record.runId) {
+          this.currentRunId = undefined;
+        }
+        this.broadcastRunEvent("run.settled", record);
+      }
+    }
     return true;
   }
 
@@ -677,7 +743,11 @@ export class PiSystemHost {
       Boolean(this.state?.permissions?.pending) ||
       this.pendingUi.size > 0;
     this.activeRun = active;
-    if (active) {
+    const hasUncertainRunRecord =
+      this.runStore?.getActiveOrBlockingRun()?.state === "UNCERTAIN";
+    if (hasUncertainRunRecord) {
+      this.uncertainRun = true;
+    } else if (active) {
       this.uncertainRun = false;
       this.clearPromptReservation();
     } else if (!this.uncertainRun && !this.promptReserved) {
@@ -809,6 +879,669 @@ export class PiSystemHost {
     for (const pending of this.pendingUi.values()) {
       this.sendClientEvent(client, "extension-ui.requested", pending.data);
     }
+    const activeRun = this.getCurrentOrBlockingRun();
+    if (activeRun) {
+      const eventName =
+        activeRun.state === "UNCERTAIN"
+          ? "run.reconcile_required"
+          : "run.updated";
+      this.sendClientEvent(
+        client,
+        eventName,
+        { run: toPublicRunSnapshot(activeRun) },
+        activeRun.sessionId,
+      );
+    }
+  }
+
+  getCurrentOrBlockingRun() {
+    if (!this.runStore) return null;
+    if (this.currentRunId) {
+      try {
+        const cur = this.runStore.getRun(this.currentRunId);
+        if (cur && !TERMINAL_RUN_STATES.has(cur.state)) return cur;
+      } catch {
+        // Ignore corrupt lookup here
+      }
+    }
+    return this.runStore.getActiveOrBlockingRun();
+  }
+
+  broadcastRunEvent(eventName, record, extra = {}) {
+    if (!record) return;
+    const payload = {
+      run: toPublicRunSnapshot(record),
+      ...extra,
+    };
+    for (const client of this.clients.values()) {
+      if (!client.ready) continue;
+      this.sendClientEvent(client, eventName, payload, record.sessionId);
+    }
+  }
+
+  sendClientResult(client, id, method, result) {
+    if (!isValidRequestResult(method, result)) {
+      this.sendClientError(
+        client,
+        id,
+        "INTERNAL_ERROR",
+        `Invalid host result for ${method}`,
+      );
+      return;
+    }
+    if (!client.socket.destroyed) {
+      line(client.socket, {
+        protocolVersion: PROTOCOL_VERSION,
+        kind: "response",
+        id,
+        ok: true,
+        result,
+      });
+    }
+  }
+
+  dispatchRunBackendPrompt(record, messageText) {
+    if (!this.backend?.stdin?.writable) {
+      this.runStore.transition(record, {
+        state: "FAILED",
+        stateReason: "BACKEND_DISCONNECTED_BEFORE_START",
+        lastStep: "prompt.dispatch_failed",
+        result: {
+          outcome: "failed",
+          partial: false,
+          errorCode: "RPC_DISCONNECTED",
+          message: "Pi frontend is disconnected",
+          verificationRefs: [],
+        },
+        eventName: "run.settled",
+      });
+      this.currentRunId = undefined;
+      this.broadcastRunEvent("run.settled", record);
+      return false;
+    }
+
+    this.currentRunId = record.runId;
+    this.promptReserved = true;
+    this.runStore.transition(record, {
+      state: "INVESTIGATING",
+      stateReason: "TURN_STARTING",
+      lastStep: "prompt.dispatched",
+      queued: false,
+      eventName: "run.updated",
+    });
+    this.broadcastRunEvent("run.updated", record);
+
+    const backendId = `host-run-${randomUUID()}`;
+    const timer = setTimeout(() => {
+      this.handleRequestTimeout(backendId);
+    }, this.requestTimeoutMs);
+    timer.unref?.();
+    this.pending.set(backendId, {
+      internalRun: true,
+      runId: record.runId,
+      method: "agent.prompt",
+      timer,
+    });
+
+    try {
+      line(this.backend.stdin, {
+        protocolVersion: PROTOCOL_VERSION,
+        kind: "request",
+        id: backendId,
+        method: "agent.prompt",
+        params: { message: messageText },
+      });
+      return true;
+    } catch {
+      clearTimeout(timer);
+      this.pending.delete(backendId);
+      this.clearPromptReservation();
+      this.runStore.transition(record, {
+        state: "FAILED",
+        stateReason: "BACKEND_WRITE_FAILED",
+        lastStep: "prompt.write_failed",
+        result: {
+          outcome: "failed",
+          partial: false,
+          errorCode: "RPC_DISCONNECTED",
+          message: "Failed to write prompt to Pi backend",
+          verificationRefs: [],
+        },
+        eventName: "run.settled",
+      });
+      this.currentRunId = undefined;
+      this.broadcastRunEvent("run.settled", record);
+      return false;
+    }
+  }
+
+  handleInternalRunBackendResponse(request, frame) {
+    const record = this.runStore?.runs.get(request.runId);
+    if (!record) return;
+    if (request.method === "agent.prompt") {
+      if (!frame.ok) {
+        this.clearPromptReservation();
+        if (frame.error?.code === "REQUEST_TIMEOUT") {
+          this.activeRun = true;
+          this.uncertainRun = true;
+          this.runStore.transition(record, {
+            state: "UNCERTAIN",
+            stateReason: "PROMPT_REQUEST_TIMEOUT",
+            lastStep: "prompt.timeout",
+            result: {
+              outcome: "uncertain",
+              partial: record.actions.some((a) => a.effectState === "applied"),
+              errorCode: "REQUEST_TIMEOUT",
+              message:
+                "Backend prompt request timed out; inspect state before retrying",
+              verificationRefs: [],
+            },
+            eventName: "run.reconcile_required",
+          });
+          this.broadcastRunEvent("run.reconcile_required", record);
+        } else {
+          this.runStore.transition(record, {
+            state: "FAILED",
+            stateReason: "PROMPT_REJECTED_BY_BACKEND",
+            lastStep: "prompt.rejected",
+            result: {
+              outcome: "failed",
+              partial: false,
+              errorCode: frame.error?.code ?? "INTERNAL_ERROR",
+              message:
+                frame.error?.message ?? "Backend rejected run prompt request",
+              verificationRefs: [],
+            },
+            eventName: "run.settled",
+          });
+          if (this.currentRunId === record.runId) {
+            this.currentRunId = undefined;
+          }
+          this.broadcastRunEvent("run.settled", record);
+          this.maybeStartNextQueuedRun();
+        }
+      } else if (!this.activeRun) {
+        this.schedulePromptReservationRelease();
+      }
+    }
+  }
+
+  handleRunLifecycleEvent(event, data) {
+    if (!this.runStore) return;
+    const record = this.getCurrentOrBlockingRun();
+    if (!record || TERMINAL_RUN_STATES.has(record.state)) return;
+
+    if (event === "tool.started") {
+      this.runStore.recordToolStarted(record, {
+        toolCallId: data?.toolCallId,
+        toolName: data?.toolName,
+      });
+      this.broadcastRunEvent("run.updated", record);
+      return;
+    }
+
+    if (event === "tool.completed" || event === "tool.failed") {
+      this.runStore.recordToolFinished(record, {
+        toolCallId: data?.toolCallId,
+        toolName: data?.toolName,
+        isError: event === "tool.failed" || data?.isError === true,
+      });
+      this.broadcastRunEvent("run.updated", record);
+      return;
+    }
+
+    if (event === "extension-ui.requested" && typeof data?.id === "string") {
+      if (record.state !== "CANCELLING") {
+        this.runStore.transition(record, {
+          state: "WAITING_INPUT",
+          stateReason: "AWAITING_USER_INPUT",
+          lastStep: `ui.requested:${data.id}`,
+          eventName: "run.input_required",
+        });
+        this.broadcastRunEvent("run.input_required", record, {
+          uiRequestId: data.id,
+        });
+      }
+      return;
+    }
+
+    if (event === "verification.changed" && typeof data?.status === "string") {
+      const normalized = /pass|ok|success/i.test(data.status)
+        ? "passed"
+        : /fail|error|blocked/i.test(data.status)
+          ? "failed"
+          : "pending";
+      this.runStore.recordVerification(record, {
+        checkId: "runtime-verification",
+        status: normalized,
+        summary: `Runtime verification status: ${data.status}`,
+      });
+      const outEvent = TERMINAL_RUN_STATES.has(record.state)
+        ? "run.settled"
+        : "run.updated";
+      this.broadcastRunEvent(outEvent, record);
+      if (record.state === "SUCCEEDED") {
+        this.currentRunId = undefined;
+        this.maybeStartNextQueuedRun();
+      }
+      return;
+    }
+
+    if (event === "agent.settled") {
+      this.runStore.settleTurn(record, { aborted: data?.aborted === true });
+      if (record.state === "UNCERTAIN") {
+        this.uncertainRun = true;
+        this.broadcastRunEvent("run.reconcile_required", record);
+      } else if (TERMINAL_RUN_STATES.has(record.state)) {
+        if (this.currentRunId === record.runId) {
+          this.currentRunId = undefined;
+        }
+        this.broadcastRunEvent("run.settled", record);
+        if (record.state === "SUCCEEDED") {
+          this.maybeStartNextQueuedRun();
+        }
+      } else {
+        this.broadcastRunEvent("run.updated", record);
+      }
+      return;
+    }
+
+    if (event === "core.disconnected") {
+      const now = new Date().toISOString();
+      for (const action of record.actions) {
+        if (!action.finishedAt) {
+          action.finishedAt = now;
+          action.effectState = "unknown";
+        }
+      }
+      this.uncertainRun = true;
+      this.runStore.transition(record, {
+        state: "UNCERTAIN",
+        stateReason: "BACKEND_DISCONNECTED",
+        lastStep: "core.disconnected",
+        result: {
+          outcome: "uncertain",
+          partial: record.actions.some((a) => a.effectState === "applied"),
+          errorCode: "PI_CRASHED",
+          message:
+            "Backend process disconnected while run was active; state inspection required",
+          verificationRefs: [],
+        },
+        eventName: "run.reconcile_required",
+      });
+      this.broadcastRunEvent("run.reconcile_required", record);
+    }
+  }
+
+  maybeStartNextQueuedRun() {
+    if (!this.runStore || this.isBusy()) return;
+    const nextQueued = this.runStore.getNextQueuedRun();
+    if (!nextQueued) return;
+    const msg = nextQueued.pendingMessage ?? nextQueued.title;
+    this.dispatchRunBackendPrompt(nextQueued, msg);
+  }
+
+  handleRunClientRequest(client, frame) {
+    const { id, method, params } = frame;
+    const sessionId = String(this.state?.session?.id ?? "default-session");
+
+    try {
+      if (method === "run.current") {
+        const active = this.getCurrentOrBlockingRun();
+        this.sendClientResult(client, id, method, {
+          run: active ? toPublicRunSnapshot(active) : null,
+        });
+        return;
+      }
+
+      if (method === "run.get") {
+        let record;
+        if (params.runId) {
+          record = this.runStore.getRun(params.runId);
+        } else if (params.clientSubmissionId) {
+          record = this.runStore.findBySubmissionId(
+            sessionId,
+            params.clientSubmissionId,
+          );
+        }
+        if (!record) {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_NOT_FOUND",
+            "Requested run was not found",
+          );
+          return;
+        }
+        this.sendClientResult(client, id, method, {
+          run: toPublicRunSnapshot(record),
+        });
+        return;
+      }
+
+      if (method === "run.list") {
+        const result = this.runStore.listRuns(params);
+        this.sendClientResult(client, id, method, result);
+        return;
+      }
+
+      if (method === "run.events") {
+        const record = this.runStore.getRun(params.runId);
+        if (!record) {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_NOT_FOUND",
+            `Run ${params.runId} not found`,
+          );
+          return;
+        }
+        const afterRevision = params.afterRevision ?? 0;
+        const events = record.events.filter(
+          (entry) => entry.revision > afterRevision,
+        );
+        this.sendClientResult(client, id, method, {
+          run: toPublicRunSnapshot(record),
+          events,
+          currentRevision: record.revision,
+        });
+        return;
+      }
+
+      if (method === "run.submit") {
+        if (params.clientSubmissionId) {
+          const existing = this.runStore.findBySubmissionId(
+            sessionId,
+            params.clientSubmissionId,
+          );
+          if (existing) {
+            this.sendClientResult(client, id, method, {
+              run: toPublicRunSnapshot(existing),
+              deduplicated: true,
+            });
+            return;
+          }
+        }
+
+        const blocking = this.getCurrentOrBlockingRun();
+        if (blocking?.state === "UNCERTAIN") {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_CONFLICT",
+            `Run ${blocking.runId} is in UNCERTAIN state and requires run.reconcile before starting a new run`,
+            false,
+          );
+          return;
+        }
+
+        if (this.isBusy() || blocking !== null) {
+          if (params.queue === true) {
+            const queuedRecord = this.runStore.createRun({
+              sessionId,
+              message: params.message,
+              title: params.title,
+              clientSubmissionId: params.clientSubmissionId,
+              requireVerification: params.requireVerification === true,
+              queued: true,
+            });
+            this.broadcastRunEvent("run.created", queuedRecord);
+            this.sendClientResult(client, id, method, {
+              run: toPublicRunSnapshot(queuedRecord),
+              deduplicated: false,
+            });
+            return;
+          }
+          this.sendClientError(
+            client,
+            id,
+            "RUN_BUSY",
+            "Pi System host already has an active run",
+            true,
+          );
+          return;
+        }
+
+        const record = this.runStore.createRun({
+          sessionId,
+          message: params.message,
+          title: params.title,
+          clientSubmissionId: params.clientSubmissionId,
+          requireVerification: params.requireVerification === true,
+          queued: false,
+        });
+        this.broadcastRunEvent("run.created", record);
+        this.dispatchRunBackendPrompt(record, params.message);
+        this.sendClientResult(client, id, method, {
+          run: toPublicRunSnapshot(record),
+          deduplicated: false,
+        });
+        return;
+      }
+
+      if (method === "run.cancel") {
+        const record = params.runId
+          ? this.runStore.getRun(params.runId)
+          : this.getCurrentOrBlockingRun();
+        if (!record) {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_NOT_FOUND",
+            "No matching run found to cancel",
+          );
+          return;
+        }
+        if (TERMINAL_RUN_STATES.has(record.state)) {
+          this.sendClientResult(client, id, method, {
+            run: toPublicRunSnapshot(record),
+            cancelScope: "already_terminal",
+          });
+          return;
+        }
+        if (record.state === "ACCEPTED" && record.queued === true) {
+          this.runStore.transition(record, {
+            state: "CANCELLED",
+            stateReason: "QUEUED_RUN_CANCELLED",
+            lastStep: "queued.cancelled",
+            queued: false,
+            result: {
+              outcome: "cancelled",
+              partial: false,
+              message: params.reason ?? "Queued run cancelled before execution",
+              cancelScope: "queued_removed",
+              verificationRefs: [],
+            },
+            eventName: "run.settled",
+          });
+          this.broadcastRunEvent("run.settled", record);
+          this.sendClientResult(client, id, method, {
+            run: toPublicRunSnapshot(record),
+            cancelScope: "queued_removed",
+          });
+          return;
+        }
+
+        if (
+          record.state === "VERIFYING" &&
+          !this.activeRun &&
+          !this.promptReserved
+        ) {
+          this.runStore.transition(record, {
+            state: "CANCELLED",
+            stateReason: "CANCELLED_DURING_VERIFICATION",
+            lastStep: "verification.cancelled",
+            result: {
+              outcome: "cancelled",
+              partial: record.actions.some((a) => a.effectState === "applied"),
+              message: params.reason ?? "Run cancelled while awaiting verification",
+              cancelScope: "turn_and_tools_stopped",
+              verificationRefs: [],
+            },
+            eventName: "run.settled",
+          });
+          if (this.currentRunId === record.runId) {
+            this.currentRunId = undefined;
+          }
+          this.broadcastRunEvent("run.settled", record);
+          this.sendClientResult(client, id, method, {
+            run: toPublicRunSnapshot(record),
+            cancelScope: "turn_abort_requested",
+          });
+          return;
+        }
+
+        this.runStore.transition(record, {
+          state: "CANCELLING",
+          stateReason: "CANCEL_REQUESTED",
+          lastStep: "cancel.requested",
+          eventName: "run.updated",
+        });
+        this.broadcastRunEvent("run.updated", record);
+        this.cancelPendingUi();
+
+        if (this.backend?.stdin?.writable) {
+          const backendId = `host-cancel-${randomUUID()}`;
+          const timer = setTimeout(() => {
+            this.handleRequestTimeout(backendId);
+          }, this.requestTimeoutMs);
+          timer.unref?.();
+          this.pending.set(backendId, {
+            internalRun: true,
+            runId: record.runId,
+            method: "agent.abort",
+            timer,
+          });
+          line(this.backend.stdin, {
+            protocolVersion: PROTOCOL_VERSION,
+            kind: "request",
+            id: backendId,
+            method: "agent.abort",
+            params: {},
+          });
+        }
+
+        this.sendClientResult(client, id, method, {
+          run: toPublicRunSnapshot(record),
+          cancelScope: "turn_abort_requested",
+        });
+        return;
+      }
+
+      if (method === "run.verify") {
+        const record = this.runStore.getRun(params.runId);
+        if (!record) {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_NOT_FOUND",
+            `Run ${params.runId} not found`,
+          );
+          return;
+        }
+        this.runStore.recordVerification(record, params);
+        const outEvent = TERMINAL_RUN_STATES.has(record.state)
+          ? "run.settled"
+          : "run.updated";
+        if (
+          TERMINAL_RUN_STATES.has(record.state) &&
+          this.currentRunId === record.runId
+        ) {
+          this.currentRunId = undefined;
+        }
+        this.broadcastRunEvent(outEvent, record);
+        if (record.state === "SUCCEEDED") {
+          this.maybeStartNextQueuedRun();
+        }
+        this.sendClientResult(client, id, method, {
+          run: toPublicRunSnapshot(record),
+        });
+        return;
+      }
+
+      if (method === "run.reconcile") {
+        const record = this.runStore.getRun(params.runId);
+        if (!record) {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_NOT_FOUND",
+            `Run ${params.runId} not found`,
+          );
+          return;
+        }
+        this.runStore.reconcileRun(record, params);
+        const stillUncertain =
+          this.runStore.getActiveOrBlockingRun()?.state === "UNCERTAIN";
+        this.uncertainRun = Boolean(stillUncertain);
+        if (
+          TERMINAL_RUN_STATES.has(record.state) &&
+          this.currentRunId === record.runId
+        ) {
+          this.currentRunId = undefined;
+        }
+        const outEvent = TERMINAL_RUN_STATES.has(record.state)
+          ? "run.settled"
+          : "run.updated";
+        this.broadcastRunEvent(outEvent, record);
+        if (record.state === "SUCCEEDED") {
+          this.maybeStartNextQueuedRun();
+        }
+        this.sendClientResult(client, id, method, {
+          run: toPublicRunSnapshot(record),
+        });
+        return;
+      }
+
+      if (method === "run.resume") {
+        const record = this.runStore.getRun(params.runId);
+        if (!record) {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_NOT_FOUND",
+            `Run ${params.runId} not found`,
+          );
+          return;
+        }
+        if (record.state !== "RESUMABLE") {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_CONFLICT",
+            `Run ${record.runId} is in state ${record.state}; only RESUMABLE runs verified as not_applied may be resumed`,
+            false,
+          );
+          return;
+        }
+        if (this.isBusy()) {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_BUSY",
+            "Pi System host is currently busy with another run",
+            true,
+          );
+          return;
+        }
+        const resumeMessage =
+          params.message ?? record.pendingMessage ?? record.title;
+        this.dispatchRunBackendPrompt(record, resumeMessage);
+        this.sendClientResult(client, id, method, {
+          run: toPublicRunSnapshot(record),
+        });
+        return;
+      }
+    } catch (error) {
+      const code = error?.code ?? "INTERNAL_ERROR";
+      this.sendClientError(
+        client,
+        id,
+        code,
+        error instanceof Error ? error.message : "Run operation failed",
+        false,
+      );
+    }
   }
 
   handleClientRequest(client, frame) {
@@ -859,6 +1592,10 @@ export class PiSystemHost {
         "INVALID_REQUEST",
         "Request id is already in flight",
       );
+      return;
+    }
+    if (frame.method.startsWith("run.")) {
+      this.handleRunClientRequest(client, frame);
       return;
     }
     if (
@@ -952,6 +1689,16 @@ export class PiSystemHost {
       this.emitUiResolved(request.uiId, request.outcome);
       return;
     }
+    if (request.internalRun) {
+      this.handleInternalRunBackendResponse(request, {
+        ok: false,
+        error: {
+          code: "REQUEST_TIMEOUT",
+          message: "Pi backend request timed out",
+        },
+      });
+      return;
+    }
     request.client.inflight.delete(request.clientId);
     if (request.uiId) {
       const pendingUi = this.pendingUi.get(request.uiId);
@@ -976,11 +1723,18 @@ export class PiSystemHost {
   }
 
   isBusy() {
+    const activeRunRecord = this.getCurrentOrBlockingRun();
+    const hasActiveRunRecord = Boolean(
+      activeRunRecord &&
+        (ACTIVE_EXECUTION_STATES.has(activeRunRecord.state) ||
+          activeRunRecord.state === "UNCERTAIN"),
+    );
     return (
       this.activeRun ||
       this.uncertainRun ||
       this.promptReserved ||
-      this.pendingUi.size > 0
+      this.pendingUi.size > 0 ||
+      hasActiveRunRecord
     );
   }
 

@@ -1048,7 +1048,9 @@ export class FrontendServer {
       piVersion: this.piVersion,
       capabilities: CAPABILITIES.filter(
         (capability) =>
-          capability !== "host-epoch" && capability !== "approval-envelope",
+          capability !== "host-epoch" &&
+          capability !== "approval-envelope" &&
+          capability !== "runs",
       ),
     });
     await this.emitInitialSnapshot();
@@ -1398,6 +1400,19 @@ export class FrontendServer {
         throw frontendError(
           "UNSUPPORTED_CAPABILITY",
           "verification.run is not directly invokable by this Pi version",
+        );
+      case "run.submit":
+      case "run.current":
+      case "run.get":
+      case "run.list":
+      case "run.cancel":
+      case "run.events":
+      case "run.reconcile":
+      case "run.resume":
+      case "run.verify":
+        throw frontendError(
+          "UNSUPPORTED_CAPABILITY",
+          `${method} requires PiSystemHost`,
         );
       default:
         throw frontendError("UNKNOWN_METHOD", `Unknown method: ${method}`);
