@@ -161,6 +161,7 @@ const SUPPORTED_PI_LINES = Object.freeze([
   { major: 0, minor: 84 },
   { major: 1, minor: 0 },
   { major: 1, minor: 2 },
+  { major: 1, minor: 3 },
 ]);
 
 export function assertCompatiblePiVersion(rawVersion) {

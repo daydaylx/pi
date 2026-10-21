@@ -21,14 +21,14 @@ import {
 } from "../index.mjs";
 
 test("accepts only the Pi lines supported by protocol v1", () => {
-  for (const version of ["0.84.3", "0.84.99-test", "1.0.4", "1.0.10", "1.2.0", "1.2.7-test"]) {
+  for (const version of ["0.84.3", "0.84.99-test", "1.0.4", "1.0.10", "1.2.0", "1.2.7-test", "1.3.0", "1.3.7-test"]) {
     assert.doesNotThrow(() => assertCompatiblePiVersion(version), version);
   }
   for (const version of [
     "0.83.9",
     "0.85.0",
     "1.1.0",
-    "1.3.0",
+    "1.4.0",
     "2.0.0",
     "1.0",
     "10.0.4",
@@ -52,7 +52,7 @@ test("reports the detected version without echoing arbitrary output", () => {
     () => assertCompatiblePiVersion("0.85.0"),
     (error) =>
       error.publicMessage ===
-      "Installed Pi 0.85.0 is not supported by frontend protocol v1 (supported: 0.84.x, 1.0.x, 1.2.x)",
+      "Installed Pi 0.85.0 is not supported by frontend protocol v1 (supported: 0.84.x, 1.0.x, 1.2.x, 1.3.x)",
   );
   assert.throws(
     () => assertCompatiblePiVersion("not a version; rm -rf /"),
