@@ -71,6 +71,10 @@ const READ_ONLY_TOOLS = new Set([
   "grep",
   "nixos_status",
   "user_service_status",
+  "system_unit_status",
+  "system_journal",
+  "desktop_state",
+  "audio_status",
   "system_file_verify",
 ]);
 const MAX_RUN_EVENTS = 200;

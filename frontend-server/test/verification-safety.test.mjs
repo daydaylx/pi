@@ -84,6 +84,18 @@ test("mutations require host readback; forged proofs, failed actions and stale c
     writeFileSync(filePath, "wrong");
     store.verifyFileReadback(mismatch, predicate);
     assert.equal(mismatch.state, "FAILED");
+    const statusOnly = create();
+    store.recordToolStarted(statusOnly, {
+      toolName: "system_unit_status",
+      toolCallId: "status",
+    });
+    store.recordToolFinished(statusOnly, {
+      toolName: "system_unit_status",
+      toolCallId: "status",
+      isError: false,
+    });
+    store.settleTurn(statusOnly);
+    assert.equal(statusOnly.state, "SUCCEEDED");
     const interrupted = create();
     store.recordToolStarted(interrupted, {
       toolName: "bash",
