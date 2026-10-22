@@ -1090,10 +1090,11 @@ export class FrontendServer {
     this.runtime = runtime;
   }
 
-  async emitInitialSnapshot() {
+  async emitInitialSnapshot(currentSession) {
     try {
-      const state = await this.runtime.request({ type: "get_state" });
-      const current = normalizeCurrentSession(state);
+      const current = currentSession ?? normalizeCurrentSession(
+        await this.runtime.request({ type: "get_state" }),
+      );
       this.state.session = {
         ...(current.id ? { id: current.id } : {}),
         ...(current.name ? { name: current.name } : {}),
@@ -1237,28 +1238,30 @@ export class FrontendServer {
           sessions: sessions.map((session) => opaqueSession(session, index)),
         };
       }
-      case "session.create":
+      case "session.create": {
         await runtime.request({ type: "new_session" });
-        return normalizeCurrentSession(
-          await runtime.request({ type: "get_state" }),
-        );
+        const current = normalizeCurrentSession(await runtime.request({ type: "get_state" }));
+        await this.emitInitialSnapshot(current);
+        return current;
+      }
       case "session.open": {
         const sessionPath = this.sessionPaths.get(params.id);
         if (!sessionPath)
           throw frontendError("SESSION_NOT_FOUND", "Session not found");
         await runtime.request({ type: "switch_session", sessionPath });
-        return normalizeCurrentSession(
-          await runtime.request({ type: "get_state" }),
-        );
+        const current = normalizeCurrentSession(await runtime.request({ type: "get_state" }));
+        await this.emitInitialSnapshot(current);
+        return current;
       }
       case "session.rename":
       case "session.archive":
       case "session.delete":
         return this.mutateSession(method, params);
-      case "session.current":
-        return normalizeCurrentSession(
-          await runtime.request({ type: "get_state" }),
-        );
+      case "session.current": {
+        const current = normalizeCurrentSession(await runtime.request({ type: "get_state" }));
+        await this.emitInitialSnapshot(current);
+        return current;
+      }
       case "session.messages": {
         let messages;
         if (params.id !== undefined) {

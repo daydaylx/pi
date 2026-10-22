@@ -684,3 +684,46 @@ test("corrupt index file does not crash session.list", async () => {
   }
 });
 
+
+for (const method of ["session.create", "session.open"]) {
+  test(`${method} publishes the actual session before accepting another run`, async () => {
+    const server = new FrontendServer();
+    server.state.session.id = "previous-session";
+    server.sessionPaths.set("next-session", "/isolated/session.jsonl");
+    let currentSession = "previous-session";
+    server.runtime = {
+      request: async ({ type }) => {
+        if (type === "new_session" || type === "switch_session") currentSession = "next-session";
+        return { sessionId: currentSession, model: { provider: "test", id: "test-model" }, thinkingLevel: "low" };
+      },
+    };
+    const emitted = [];
+    server.emit = (event, data) => emitted.push({ event, data });
+    const result = await server.dispatch(method, { id: "next-session" });
+    assert.equal(result.id, "next-session");
+    assert.equal(server.state.session.id, result.id);
+    assert.equal(emitted.at(-1).event, "state.snapshot");
+    assert.equal(emitted.at(-1).data.session.id, result.id);
+  });
+}
+
+test("session mutations do not publish stale success when state read fails and current repairs ownership", async () => {
+  for (const method of ["session.create", "session.open"]) {
+    const server = new FrontendServer();
+    server.state.session.id = "previous-session";
+    server.sessionPaths.set("next-session", "/isolated/session.jsonl");
+    let failRead = true;
+    server.runtime = { request: async ({ type }) => {
+      if (type === "get_state" && failRead) throw new Error("isolated state read failure");
+      return { sessionId: "next-session" };
+    }};
+    const emitted = [];
+    server.emit = (event, data) => emitted.push({ event, data });
+    await assert.rejects(server.dispatch(method, { id: "next-session" }), /state read failure/);
+    assert.equal(emitted.length, 0);
+    failRead = false;
+    const recovered = await server.dispatch("session.current", {});
+    assert.equal(recovered.id, "next-session");
+    assert.equal(emitted.at(-1).data.session.id, recovered.id);
+  }
+});
