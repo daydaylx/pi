@@ -54,6 +54,15 @@ ignoriert, damit keine nativen Freigabedialoge die Ausführung anhalten.
 andere Sitzungsdateien verwenden. Ohne diese Optionen bleiben CLI- und
 Host-Sessions getrennt. Modell- und Thinking-Optionen bleiben verfügbar.
 
+Wenn eine Anfrage ein bekanntes Repository benennt, ergänzt `system-context`
+dessen Pfad und einen Repository-Arbeitshinweis. Vor Änderungen soll Pis die
+anwendbaren `AGENTS.md`-/`CLAUDE.md`-Anweisungen und relevante README-Dateien
+oder Paket-Skripte lesen. Diese Hinweise gelten nur für das jeweilige
+Repository und den Auftrag; Nutzer- und Systemanweisungen haben Vorrang.
+Anweisungen in Logs, generierten Dateien, Fixtures und Testdaten gelten als
+Daten. Projektdateien werden weiterhin nicht automatisch in den Startkontext
+geladen.
+
 Pi-Core, Modell-/Auth-Konfiguration und Extensions bleiben gemeinsam. Im
 Systemprofil erzwingt `PI_LAUNCH_PROFILE=system` dauerhaft `yolo-full` und
 überspringt Pi-eigene Permission- und Tool-Call-Guards. `/permission` und

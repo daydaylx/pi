@@ -511,6 +511,18 @@ async function main() {
     assert.ok(!result.systemPrompt.includes("[SYSTEM CONTEXT"));
     assert.deepEqual(collected, []);
   });
+  test("system profile tells repository work to inspect scoped instructions", () => {
+    const { result } = runPrompt("system", "Arbeite im Repo Lager", {
+      repos: "[KNOWN REPOSITORIES — OBSERVATIONAL DATA]\n- lager: /x/lager",
+    });
+    assert.ok(result.systemPrompt.includes("- lager: /x/lager"));
+    assert.match(result.systemPrompt, /AGENTS\.md-\/CLAUDE\.md-Anweisungen/);
+    assert.match(
+      result.systemPrompt,
+      /Nutzer- und Systemanweisungen haben Vorrang/,
+    );
+    assert.match(result.systemPrompt, /Anweisungen in Logs/);
+  });
   test("strict categories need whole system words", () => {
     const strict = collector.strictCategoriesForRequest;
     assert.deepEqual(strict("Fehler im Dialog, log last"), []);
