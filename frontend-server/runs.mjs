@@ -1,3 +1,4 @@
+import { readFileGoal } from "./file-readback.mjs";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -59,13 +60,26 @@ const MUTATING_TOOLS = new Set([
   "desktop_focus_window",
   "audio_set_volume",
   "user_service",
-  "system_job",
-  "notify",
   "nixos_build",
   "nixos_apply",
 ]);
 
+const READ_ONLY_TOOLS = new Set([
+  "read",
+  "ls",
+  "find",
+  "grep",
+  "nixos_status",
+  "user_service_status",
+  "system_unit_status",
+  "system_journal",
+  "desktop_state",
+  "audio_status",
+  "system_file_verify",
+]);
 const MAX_RUN_EVENTS = 200;
+// Only an actual host-side readback can create positive goal evidence.
+const READBACK_PROOF = Symbol("host-readback");
 
 function sanitizeTitle(raw, fallback = "Systemauftrag") {
   if (typeof raw !== "string") return fallback;
@@ -505,7 +519,8 @@ export class RunStore {
       schemaVersion: 1,
       runId,
       sessionId,
-      ...(typeof clientSubmissionId === "string" && clientSubmissionId.length > 0
+      ...(typeof clientSubmissionId === "string" &&
+      clientSubmissionId.length > 0
         ? { clientSubmissionId }
         : {}),
       title: normalizedTitle,
@@ -538,7 +553,10 @@ export class RunStore {
     return this.persist(record);
   }
 
-  transition(record, { state, stateReason, lastStep, queued, result, eventName = "run.updated" }) {
+  transition(
+    record,
+    { state, stateReason, lastStep, queued, result, eventName = "run.updated" },
+  ) {
     const now = new Date().toISOString();
     record.updatedAt = now;
     record.revision += 1;
@@ -561,21 +579,32 @@ export class RunStore {
   ) {
     normalizeRunRecord(record);
     const now = new Date().toISOString();
-    const mutating = MUTATING_TOOLS.has(toolName) || externalJob === true;
+    const mutating =
+      MUTATING_TOOLS.has(toolName) ||
+      !READ_ONLY_TOOLS.has(toolName) ||
+      externalJob === true;
     const action = {
       actionId: `act_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
       toolCallId: String(toolCallId || `tc_${record.actions.length + 1}`),
       toolName: String(toolName || "unknown"),
       mutating,
       externalJob: externalJob === true,
+      ...(typeof args?.path === "string" &&
+      path.isAbsolute(args.path) &&
+      ["write", "edit"].includes(toolName)
+        ? { targetPath: args.path }
+        : {}),
       startedAt: now,
       effectState: "executing",
     };
-    // Tool completion proves that execution returned, not that the requested
-    // system state now holds. Any mutating run therefore needs a separate
-    // observation before it can be reported as successful.
-    if (mutating) record.requireVerification = true;
     record.actions.push(action);
+    if (mutating) {
+      // Retire stale positive evidence rather than leaving a pending check
+      // that a later tool call (with a fresh check ID) could never replace.
+      record.verification = record.verification.filter(
+        (check) => check.status !== "passed",
+      );
+    }
     if (args && typeof args === "object") {
       if (typeof args.path === "string") {
         addUniqueBounded(record.source_of_truth, args.path);
@@ -618,17 +647,6 @@ export class RunStore {
         : action.mutating
           ? "applied"
           : "not_applied";
-      if (!isError && action.mutating && record.rollback.status === "none") {
-        record.rollback = {
-          available: true,
-          strategy:
-            resolvedName === "nixos_apply"
-              ? "nixos-generation-rollback"
-              : "git-or-backup-restore",
-          ref: action.actionId,
-          status: "available",
-        };
-      }
       if (!isError && !action.mutating) {
         addUniqueBounded(
           record.observations,
@@ -666,7 +684,15 @@ export class RunStore {
       rollback,
       remaining_issues,
     },
+    proof,
   ) {
+    if (status === "passed" && proof !== READBACK_PROOF) {
+      const error = new Error(
+        "Positive verification requires a host-executed readback",
+      );
+      error.code = "PERMISSION_DENIED";
+      throw error;
+    }
     applyOperatorReportFields(record, {
       source_of_truth,
       observations,
@@ -693,6 +719,20 @@ export class RunStore {
       status,
       summary,
       recordedAt: now,
+      ...(proof === READBACK_PROOF
+        ? {
+            proofKind: "host-file-sha256",
+            coveredActionIds: record.actions
+              .filter(
+                (a) =>
+                  a.mutating &&
+                  a.targetPath === source_of_truth?.[0] &&
+                  a.finishedAt &&
+                  a.effectState === "applied",
+              )
+              .map((a) => a.actionId),
+          }
+        : {}),
       ...(typeof evidenceRef === "string" && evidenceRef.length > 0
         ? { evidenceRef }
         : {}),
@@ -707,11 +747,27 @@ export class RunStore {
     record.lastStep = `verification.${status}:${checkId}`;
 
     if (
-      record.requireVerification &&
       record.state === "VERIFYING" &&
       status === "passed" &&
-      !record.actions.some((action) => action.effectState === "failed") &&
-      !record.verification.some((v) => v.status === "failed" || v.status === "pending")
+      !record.actions.some(
+        (a) =>
+          !a.finishedAt ||
+          a.effectState === "failed" ||
+          a.effectState === "unknown",
+      ) &&
+      record.actions
+        .filter((a) => a.mutating && a.effectState !== "not_applied")
+        .every((a) =>
+          record.verification.some(
+            (v) =>
+              v.status === "passed" &&
+              v.proofKind === "host-file-sha256" &&
+              v.coveredActionIds?.includes(a.actionId),
+          ),
+        ) &&
+      !record.verification.some(
+        (v) => v.status === "failed" || v.status === "pending",
+      )
     ) {
       record.state = "SUCCEEDED";
       record.stateReason = "VERIFICATION_PASSED";
@@ -745,6 +801,49 @@ export class RunStore {
     return this.persist(record);
   }
 
+  // Trusted in-process operator entry point, deliberately unavailable over IPC.
+  // Use only for a goal expressible as exact file contents. Other goals stay open.
+  verifyFileReadback(record, { filePath, expectedSha256, checkId }) {
+    if (
+      !["VERIFYING", "INVESTIGATING", "EXECUTING"].includes(record.state) ||
+      !checkId
+    ) {
+      const error = new Error(
+        "Readback requires an executing or VERIFYING run",
+      );
+      error.code = "RUN_CONFLICT";
+      throw error;
+    }
+    const { actualSha256: actual } = readFileGoal(filePath, expectedSha256);
+    return this.recordVerification(
+      record,
+      {
+        checkId,
+        status: actual === expectedSha256 ? "passed" : "failed",
+        summary:
+          actual === expectedSha256
+            ? "Host file readback matches expected SHA-256"
+            : "Host file readback differs from expected SHA-256",
+        evidenceRef: `sha256:${actual}`,
+        source_of_truth: [filePath],
+      },
+      READBACK_PROOF,
+    );
+  }
+
+  getEvents(record, afterRevision = 0) {
+    const first = record.events[0]?.revision ?? record.revision;
+    return {
+      run: toPublicRunSnapshot(record),
+      events: record.events.filter((entry) => entry.revision > afterRevision),
+      currentRevision: record.revision,
+      // Clients of protocol 1 can derive this from first revision as well.
+      earliestAvailableRevision: first,
+      historyTruncated:
+        afterRevision < first - 1 || afterRevision > record.revision,
+    };
+  }
+
   settleTurn(record, { aborted = false } = {}) {
     const now = new Date().toISOString();
     const hasInflightMutatingAction = record.actions.some(
@@ -758,7 +857,17 @@ export class RunStore {
     );
     const hasPassedVerification =
       record.verification.length > 0 &&
-      record.verification.every((v) => v.status === "passed");
+      record.verification.every(
+        (v) => v.status === "passed" && v.proofKind === "host-file-sha256",
+      ) &&
+      record.actions
+        .filter((a) => a.mutating && a.effectState !== "not_applied")
+        .every((a) =>
+          record.verification.some(
+            (v) =>
+              v.status === "passed" && v.coveredActionIds?.includes(a.actionId),
+          ),
+        );
 
     if (aborted || record.state === "CANCELLING") {
       if (hasInflightMutatingAction) {
@@ -808,6 +917,15 @@ export class RunStore {
       });
     }
 
+    if (hasInflightMutatingAction) {
+      return this.transition(record, {
+        state: "UNCERTAIN",
+        stateReason: "MUTATING_ACTION_COMPLETION_UNKNOWN",
+        lastStep: "turn.settled_with_inflight_action",
+        eventName: "run.reconcile_required",
+      });
+    }
+
     if (hasFailedVerification) {
       return this.transition(record, {
         state: "FAILED",
@@ -826,7 +944,6 @@ export class RunStore {
       });
     }
 
-    // A later positive report cannot erase a failed system action.
     if (hasFailedAction) {
       return this.transition(record, {
         state: "FAILED",
@@ -844,7 +961,7 @@ export class RunStore {
     }
 
     if (
-      (record.requireVerification || record.actions.some((action) => action.mutating)) &&
+      (record.requireVerification || record.actions.some((a) => a.mutating)) &&
       !hasPassedVerification
     ) {
       return this.transition(record, {
@@ -942,10 +1059,7 @@ export class RunStore {
       });
     }
 
-    // `effectState: applied` and an evidenceRef are caller assertions. They
-    // resolve whether replay is safe, but are not an independent readback.
-    // Keep mutating runs open for a trusted verification path.
-    record.requireVerification = true;
+    // A caller's effect assertion or evidence label is not a measured goal check.
     return this.transition(record, {
       state: "VERIFYING",
       stateReason: "RECONCILED_APPLIED_AWAITING_VERIFICATION",

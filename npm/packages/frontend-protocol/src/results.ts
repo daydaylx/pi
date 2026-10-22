@@ -401,6 +401,8 @@ export const REQUEST_RESULT_SCHEMAS = {
       run: RunSnapshotSchema,
       events: Type.Array(RunEventEntrySchema),
       currentRevision: Type.Integer({ minimum: 1 }),
+      earliestAvailableRevision: Type.Optional(Type.Integer({ minimum: 1 })),
+      historyTruncated: Type.Optional(Type.Boolean()),
     },
     Strict,
   ),

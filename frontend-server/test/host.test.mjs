@@ -20,6 +20,34 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fakePi = path.join(here, "fixtures", "fake-system-host-pi.mjs");
 const FRAME_WAIT_MS = 45_000;
 
+test("queued run starts after the prompt reservation grace period", async () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-host-queue-grace-"));
+  const agentDir = path.join(temp, "agent");
+  mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+  const host = new PiSystemHost({
+    env: { ...process.env, HOME: temp, PI_CODING_AGENT_DIR: agentDir },
+    runtimeDir: temp,
+    promptStartGraceMs: 10,
+  });
+  const queued = { pendingMessage: "queued prompt", title: "Queued title" };
+  let started;
+  host.runStore = { getNextQueuedRun: () => queued };
+  host.isBusy = () => false;
+  host.dispatchRunBackendPrompt = (run, message) => {
+    started = { run, message };
+  };
+
+  try {
+    host.schedulePromptReservationRelease();
+    await waitFor(() => started);
+    assert.equal(started.run, queued);
+    assert.equal(started.message, "queued prompt");
+  } finally {
+    host.clearPromptReservation();
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 function connectClient(socketPath) {
   const socket = net.createConnection(socketPath);
   const frames = [];

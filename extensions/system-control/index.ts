@@ -1,3 +1,4 @@
+import { readFileGoal } from "../../frontend-server/file-readback.mjs";
 import { execFile as nodeExecFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -607,4 +608,33 @@ function activateOnSystemRequest(pi: ExtensionAPI): void {
 
 export default function systemControlExtension(pi: ExtensionAPI): void {
   registerSystemControl(pi);
+  if (getPiLaunchProfile() === "system")
+    pi.registerTool({
+      name: "system_file_verify",
+      label: "Dateiziel unabhängig prüfen",
+      description:
+        "Read back a regular file (max 16 MiB, no symlinks) and compare SHA-256 with the expected goal contents. Use after file mutations; derive the expected digest from the requested target, not from the current file. Other system goals remain unverified. No shell is executed.",
+      parameters: Type.Object(
+        {
+          filePath: Type.String({ minLength: 1 }),
+          expectedSha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+        },
+        { additionalProperties: false },
+      ),
+      async execute(_id, params) {
+        const goalCheck = readFileGoal(params.filePath, params.expectedSha256);
+        return {
+          content: [
+            {
+              type: "text",
+              text: goalCheck.passed
+                ? "File goal verified by readback"
+                : "File goal differs from expected contents",
+            },
+          ],
+          details: { goalCheck },
+          isError: !goalCheck.passed,
+        };
+      },
+    });
 }

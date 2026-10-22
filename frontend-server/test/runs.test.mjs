@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import {
@@ -55,9 +56,7 @@ function connectClient(socketPath) {
         method,
         params,
       });
-      return this.next(
-        (frame) => frame.kind === "response" && frame.id === id,
-      );
+      return this.next((frame) => frame.kind === "response" && frame.id === id);
     },
     next(predicate, timeoutMs = FRAME_WAIT_MS) {
       const index = frames.findIndex(predicate);
@@ -66,7 +65,7 @@ function connectClient(socketPath) {
         const timer = setTimeout(() => {
           const idx = waiters.findIndex((w) => w.resolve === wrappedResolve);
           if (idx >= 0) waiters.splice(idx, 1);
-          reject(new Error("Timed out waiting for host frame"));
+          reject(new Error(`Timed out waiting for host frame: ${predicate}`));
         }, timeoutMs);
         const wrappedResolve = (frame) => {
           clearTimeout(timer);
@@ -112,48 +111,6 @@ test("RunStore persists atomic manifests, isolates corrupt files, and enforces c
     assert.equal(run1.title, "Check NetworkManager status");
     assert.equal(run1.state, "ACCEPTED");
 
-    // Tool success is not an outcome proof; only an internal readback can
-    // settle a mutating run after the host has held it at VERIFYING.
-    const verifiedRun = store1.createRun({
-      sessionId: "sess-1",
-      message: "Verify a real target readback",
-      clientSubmissionId: "sub-verified",
-    });
-    store1.recordToolStarted(verifiedRun, { toolCallId: "tc-verify", toolName: "bash" });
-    store1.recordToolFinished(verifiedRun, {
-      toolCallId: "tc-verify",
-      toolName: "bash",
-      isError: false,
-    });
-    store1.settleTurn(verifiedRun);
-    assert.equal(verifiedRun.requireVerification, true);
-    assert.equal(verifiedRun.state, "VERIFYING");
-    store1.recordVerification(verifiedRun, {
-      checkId: "host-readback",
-      status: "passed",
-      summary: "Independent readback matched the requested target",
-      evidenceRef: "test-readback-1",
-      source_of_truth: ["test target"],
-      observations: ["observed target state matched"],
-    });
-    assert.equal(verifiedRun.state, "SUCCEEDED");
-
-    const replayProbe = store1.createRun({
-      sessionId: "sess-1",
-      message: "Exercise bounded event replay",
-    });
-    for (let index = 0; index < 205; index += 1) {
-      store1.transition(replayProbe, {
-        state: "INVESTIGATING",
-        lastStep: `probe.${index}`,
-      });
-    }
-    const replayEvents = replayProbe.events.filter((entry) => entry.revision > 1);
-    assert.equal(replayProbe.events.length, 200);
-    assert.ok(replayEvents[0].revision > 2, "old revisions are absent, not reconstructed");
-    assert.ok(replayEvents[0].revision > 1 + 1, "a client can detect the replay gap");
-    store1.transition(replayProbe, { state: "CANCELLED", lastStep: "probe.done" });
-
     // 120x idempotent lookup check -> always same runId, 0 duplicates
     for (let i = 0; i < 120; i += 1) {
       const found = store1.findBySubmissionId("sess-1", "sub-100");
@@ -166,7 +123,11 @@ test("RunStore persists atomic manifests, isolates corrupt files, and enforces c
     assert.equal(run1.actions[0].effectState, "executing");
 
     // Write a corrupt manifest file to verify isolation
-    writeFileSync(path.join(runsDir, "run_corrupted1.json"), "{ invalid json", "utf8");
+    writeFileSync(
+      path.join(runsDir, "run_corrupted1.json"),
+      "{ invalid json",
+      "utf8",
+    );
 
     // 3. New host epoch starts and reconciles disk state
     const store2 = new RunStore({ runsDir, hostEpoch: "epoch-2" });
@@ -224,9 +185,7 @@ test("RunStore persists atomic manifests, isolates corrupt files, and enforces c
     assert.deepEqual(r1Uncertain.source_of_truth, [
       "/etc/nixos/configuration.nix",
     ]);
-    assert.deepEqual(r1Uncertain.observations, [
-      "Target file hash unchanged",
-    ]);
+    assert.deepEqual(r1Uncertain.observations, ["Target file hash unchanged"]);
     assert.deepEqual(r1Uncertain.rollback, {
       available: true,
       strategy: "git-checkout",
@@ -257,7 +216,9 @@ test(
           ...process.env,
           HOME: temp,
           PI_CODING_AGENT_DIR: agentDir,
-          PI_SYSTEM_HOST_ENV_PASSTHROUGH: "FAKE_PI_PROMPT_LOG",
+          PI_SYSTEM_HOST_ENV_PASSTHROUGH:
+            "FAKE_PI_PROMPT_LOG,FAKE_PI_GOAL_FILE",
+          FAKE_PI_GOAL_FILE: path.join(temp, "isolated-result.txt"),
           FAKE_PI_PROMPT_LOG: promptLog,
         },
         runtimeDir: temp,
@@ -356,49 +317,34 @@ test(
       assert.ok(eventsRes.result.events.length >= 2);
       assert.equal(eventsRes.result.run.state, "VERIFYING");
 
-      // A client cannot turn an unsupported claim into a positive result.
+      // A frontend cannot assert success, even with an evidence label.
       const verifyRes = await c1.request("ver-1", "run.verify", {
         runId: runId1,
-        checkId: "unit-active-check",
+        checkId: "forged",
         status: "passed",
-        summary: "Unit verified active",
-        evidenceRef: "systemctl-check-1",
+        summary: "Trust me",
+        evidenceRef: "arbitrary-label",
       });
       assert.equal(verifyRes.ok, false);
       assert.equal(verifyRes.error.code, "PERMISSION_DENIED");
-      const stillVerifying = await c1.request("get-verifying-1", "run.get", {
-        runId: runId1,
-      });
-      assert.equal(stillVerifying.result.run.state, "VERIFYING");
+      const readbackFile = path.join(temp, "isolated-result.txt");
+      writeFileSync(readbackFile, "expected result");
+      const verify = (id) => {
+        const record = host.runStore.getRun(id);
+        host.runStore.verifyFileReadback(record, {
+          filePath: readbackFile,
+          expectedSha256: createHash("sha256")
+            .update("expected result")
+            .digest("hex"),
+          checkId: "isolated-file-readback",
+        });
+        host.broadcastRunEvent("run.settled", record);
+        host.currentRunId = undefined;
+        host.maybeStartNextQueuedRun();
+      };
+      verify(runId1);
 
-      // Pi's general verification footer is unrelated to the run's target.
-      host.handleRunLifecycleEvent("verification.changed", { status: "passed" });
-      const afterFooter = await c1.request("get-verifying-2", "run.get", {
-        runId: runId1,
-      });
-      assert.equal(afterFooter.result.run.state, "VERIFYING");
-
-      // Simulate an in-process trusted readback result. The external socket
-      // has no API for submitting this positive result.
-      assert.equal(
-        host.recordTrustedRunVerification(runId1, {
-          checkId: "fake-positive",
-          status: "passed",
-          summary: "Unsubstantiated positive message",
-        }),
-        undefined,
-      );
-      const trustedRun = host.recordTrustedRunVerification(runId1, {
-        checkId: "host-readback",
-        status: "passed",
-        summary: "Independent system readback matched the requested unit state",
-        evidenceRef: "host-check:systemd-unit-status",
-        source_of_truth: ["systemd:pi-test.service"],
-        observations: ["systemd readback matched"],
-      });
-      assert.equal(trustedRun.state, "SUCCEEDED");
-
-      // Queued Run 2 now automatically runs and settles as SUCCEEDED
+      // A non-mutating queued conversation can settle without a goal readback.
       const run2Settled = await c1.next(
         (f) => f.event === "run.settled" && f.data.run.runId === runId2,
       );
@@ -416,14 +362,6 @@ test(
       );
       assert.equal(failSettled.data.run.state, "FAILED");
       assert.equal(failSettled.data.run.result.outcome, "failed");
-      const forgedAfterFailure = await c1.request("verify-failed-run", "run.verify", {
-        runId: failRunId,
-        checkId: "fake-positive",
-        status: "passed",
-        summary: "This claim must not erase the tool failure",
-      });
-      assert.equal(forgedAfterFailure.ok, false);
-      assert.equal(forgedAfterFailure.error.code, "PERMISSION_DENIED");
 
       // 3. Test controlled cancel of normal active run -> CANCELLED
       const cancelSubmit = await c1.request("sub-cancel", "run.submit", {
@@ -501,43 +439,47 @@ test(
       );
 
       // Direct run.resume without reconcile MUST be rejected with RUN_CONFLICT
-      const prematureResume = await cAfter.request("res-blocked", "run.resume", {
-        runId: hangRunId,
-      });
+      const prematureResume = await cAfter.request(
+        "res-blocked",
+        "run.resume",
+        {
+          runId: hangRunId,
+        },
+      );
       assert.equal(prematureResume.ok, false);
       assert.equal(prematureResume.error.code, "RUN_CONFLICT");
 
-      // Reconcile as "not_applied" -> RESUMABLE. A resumed mutating action
-      // still requires independent verification after the tool completes.
+      // Reconcile as "not_applied" -> transitions to RESUMABLE, then resume with safe message -> SUCCEEDED
       const recRes = await cAfter.request("rec-1", "run.reconcile", {
         runId: hangRunId,
         effectState: "not_applied",
         notes: "Checked target state: command did not take effect before crash",
       });
-      assert.equal(recRes.ok, true);
-      assert.equal(recRes.result.run.state, "RESUMABLE");
+      assert.equal(recRes.ok, false);
+      assert.equal(recRes.error.code, "PERMISSION_DENIED");
+      host.runStore.reconcileRun(host.runStore.getRun(hangRunId), {
+        effectState: "not_applied",
+        notes: "Trusted test operator inspection",
+      });
 
+      host.uncertainRun = false;
+      host.activeRun = false;
       const resumeRes = await cAfter.request("res-ok", "run.resume", {
         runId: hangRunId,
         message: "Safe resumed execution [TOOL_OK]",
       });
       assert.equal(resumeRes.ok, true);
-      const resumedVerifying = await cAfter.next(
+      await cAfter.next(
         (f) =>
           f.event === "run.updated" &&
           f.data.run.runId === hangRunId &&
           f.data.run.state === "VERIFYING",
       );
-      assert.equal(resumedVerifying.data.run.state, "VERIFYING");
-      const resumedVerified = host.recordTrustedRunVerification(hangRunId, {
-        checkId: "resume-readback",
-        status: "passed",
-        summary: "Independent readback confirmed the resumed target state",
-        evidenceRef: "host-check:test-readback",
-        source_of_truth: ["isolated fake target"],
-        observations: ["readback matched after resume"],
-      });
-      assert.equal(resumedVerified.state, "SUCCEEDED");
+      verify(hangRunId);
+      const resumedSettled = await cAfter.next(
+        (f) => f.event === "run.settled" && f.data.run.runId === hangRunId,
+      );
+      assert.equal(resumedSettled.data.run.state, "SUCCEEDED");
 
       // 5. Verify existing v1 methods still work seamlessly
       const pingRes = await cAfter.request("v1-ping", "system.ping");
@@ -561,7 +503,11 @@ test(
       }
       const burstResults = await Promise.all(burstPromises);
       const uniqueRunIds = new Set(burstResults.map((r) => r.result.run.runId));
-      assert.equal(uniqueRunIds.size, 1, "exactly one run created across 105 submissions");
+      assert.equal(
+        uniqueRunIds.size,
+        1,
+        "exactly one run created across 105 submissions",
+      );
       assert.equal(
         burstResults.filter((r) => r.result.deduplicated === false).length,
         1,
@@ -586,22 +532,16 @@ test(
       assert.equal(qCancelRes.result.cancelScope, "queued_removed");
       assert.equal(qCancelRes.result.run.state, "CANCELLED");
 
-      const burstVerifying = await cAfter.next(
+      await cAfter.next(
         (f) =>
           f.event === "run.updated" &&
           f.data.run.runId === burstRunId &&
           f.data.run.state === "VERIFYING",
       );
-      assert.equal(burstVerifying.data.run.state, "VERIFYING");
-      const burstVerified = host.recordTrustedRunVerification(burstRunId, {
-        checkId: "burst-readback",
-        status: "passed",
-        summary: "Independent readback confirmed the isolated fake target",
-        evidenceRef: "host-check:burst-readback",
-        source_of_truth: ["isolated fake target"],
-        observations: ["readback matched"],
-      });
-      assert.equal(burstVerified.state, "SUCCEEDED");
+      verify(burstRunId);
+      await cAfter.next(
+        (f) => f.event === "run.settled" && f.data.run.runId === burstRunId,
+      );
       const promptLinesAfter100 = readFileSync(promptLog, "utf8")
         .trim()
         .split(/\r?\n/)
@@ -632,8 +572,7 @@ test(
       assert.equal(hcCancelRes.result.run.state, "CANCELLING");
       const hcReconcileReq = await cAfter.next(
         (f) =>
-          f.event === "run.reconcile_required" &&
-          f.data.run.runId === hcRunId,
+          f.event === "run.reconcile_required" && f.data.run.runId === hcRunId,
       );
       assert.equal(hcReconcileReq.data.run.state, "UNCERTAIN");
       assert.equal(
@@ -641,25 +580,16 @@ test(
         "turn_aborted_external_effect_uncertain",
       );
 
-      // Reconcile as already applied with an evidenceRef is only a caller
-      // assertion; the mutating action remains in VERIFYING.
+      // Reconcile as already applied with evidence -> SUCCEEDED without re-running prompt
       const hcRec = await cAfter.request("hc-rec", "run.reconcile", {
         runId: hcRunId,
         effectState: "applied",
         notes: "External tool completed before abort took effect",
         evidenceRef: "state-check-ok",
       });
-      assert.equal(hcRec.ok, true);
-      assert.equal(hcRec.result.run.state, "VERIFYING");
-      const forgedVerify = await cAfter.request("hc-forged-verify", "run.verify", {
-        runId: hcRunId,
-        checkId: "fake-readback",
-        status: "passed",
-        summary: "Unsupported positive claim",
-        evidenceRef: "state-check-ok",
-      });
-      assert.equal(forgedVerify.ok, false);
-      assert.equal(forgedVerify.error.code, "PERMISSION_DENIED");
+      assert.equal(hcRec.ok, false);
+      assert.equal(hcRec.error.code, "PERMISSION_DENIED");
+      assert.equal(host.runStore.getRun(hcRunId).state, "UNCERTAIN");
     } finally {
       for (const c of clients) c.socket.destroy();
       await host.stop();

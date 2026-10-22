@@ -38,3 +38,34 @@ Consumers must reject incompatible protocol majors and must not import Pi intern
 - Adds paged message parameters and cursor validation for `session.messages`.
 - Adds approval metadata/envelope and events (`extension-ui.requested`, `extension-ui.resolved`).
 - Adds `RESULT_TOO_LARGE` error code.
+
+### System-host goal evidence and recovery
+
+The authoritative socket is `$XDG_RUNTIME_DIR/pi-system-host/frontend.sock`.
+Use `clientSubmissionId`, `afterRevision`, and `requireVerification`.
+The system host advertises `goal-readback` after the verification correction.
+A mutating run cannot succeed just because the turn or tool completed.
+Frontend `run.verify` assertions and frontend effect assertions in
+`run.reconcile` (`applied` / `not_applied`) return `PERMISSION_DENIED`.
+An evidence label, a generic `verification.changed` status, or an unrelated
+successful check is not proof of a system goal. Any failed action remains failure.
+
+Currently automatic goal evidence is deliberately limited to regular file
+contents (16 MiB maximum, no final symlinks). In the system profile the agent can
+use `system_file_verify(filePath, expectedSha256)` after `write` / `edit`.
+Derive the expected digest from the requested target contents. The runtime
+forwards the predicate only from this tool's completion; the host independently
+reads the file again and associates the result with matching completed file
+actions. A check of another file cannot cover a shell command or an unknown
+system effect. Subsequent mutations invalidate older checks. Uncovered effects
+stay `VERIFYING`; interrupted effects stay `UNCERTAIN` until trusted inspection.
+No socket method executes arbitrary checks or grants replay permission.
+This trusts the local Pi runtime and its system-profile tools, not frontend
+claims. It does not isolate a malicious process already running as the same UID.
+
+`run.events` returns the authoritative snapshot even after truncation, plus
+`earliestAvailableRevision` and `historyTruncated`. Clients must reload the
+snapshot on reconnect and use their last revision for event replay. Older v1
+responses without these fields require detecting a gap from the first retained
+revision. Never reconstruct missing events or retry with a new submission ID.
+Unknown submission IDs are not replayed while corrupt manifests exist.

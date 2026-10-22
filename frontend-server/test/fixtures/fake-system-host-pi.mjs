@@ -167,7 +167,10 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
     }
     if (request.type === "prompt") {
       if (process.env.FAKE_PI_PROMPT_LOG) {
-        appendFileSync(process.env.FAKE_PI_PROMPT_LOG, `${request.id}:${request.message ?? ""}\n`);
+        appendFileSync(
+          process.env.FAKE_PI_PROMPT_LOG,
+          `${request.id}:${request.message ?? ""}\n`,
+        );
       }
       if (process.env.FAKE_PI_HANG_PROMPT === "1") return;
       send({ type: "agent_start" });
@@ -209,12 +212,13 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
           send({
             type: "tool_execution_start",
             toolCallId: "tc-ok-1",
-            toolName: "bash",
+            toolName: "write",
+            args: { path: process.env.FAKE_PI_GOAL_FILE },
           });
           send({
             type: "tool_execution_end",
             toolCallId: "tc-ok-1",
-            toolName: "bash",
+            toolName: "write",
             isError: false,
           });
           send({ type: "agent_settled", aborted: false });
