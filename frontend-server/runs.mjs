@@ -59,6 +59,8 @@ const MUTATING_TOOLS = new Set([
   "desktop_focus_window",
   "audio_set_volume",
   "user_service",
+  "system_job",
+  "notify",
   "nixos_build",
   "nixos_apply",
 ]);
@@ -569,6 +571,10 @@ export class RunStore {
       startedAt: now,
       effectState: "executing",
     };
+    // Tool completion proves that execution returned, not that the requested
+    // system state now holds. Any mutating run therefore needs a separate
+    // observation before it can be reported as successful.
+    if (mutating) record.requireVerification = true;
     record.actions.push(action);
     if (args && typeof args === "object") {
       if (typeof args.path === "string") {
@@ -701,8 +707,10 @@ export class RunStore {
     record.lastStep = `verification.${status}:${checkId}`;
 
     if (
+      record.requireVerification &&
       record.state === "VERIFYING" &&
       status === "passed" &&
+      !record.actions.some((action) => action.effectState === "failed") &&
       !record.verification.some((v) => v.status === "failed" || v.status === "pending")
     ) {
       record.state = "SUCCEEDED";
@@ -818,7 +826,8 @@ export class RunStore {
       });
     }
 
-    if (hasFailedAction && !hasPassedVerification) {
+    // A later positive report cannot erase a failed system action.
+    if (hasFailedAction) {
       return this.transition(record, {
         state: "FAILED",
         stateReason: "TOOL_EXECUTION_FAILED",
@@ -834,7 +843,10 @@ export class RunStore {
       });
     }
 
-    if (record.requireVerification && !hasPassedVerification) {
+    if (
+      (record.requireVerification || record.actions.some((action) => action.mutating)) &&
+      !hasPassedVerification
+    ) {
       return this.transition(record, {
         state: "VERIFYING",
         stateReason: "AWAITING_VERIFICATION_EVIDENCE",
@@ -930,34 +942,10 @@ export class RunStore {
       });
     }
 
-    // effectState === "applied"
-    if (evidenceRef || !record.requireVerification) {
-      if (evidenceRef) {
-        record.verification.push({
-          checkId: "reconcile-verification",
-          status: "passed",
-          summary: notes || "External effect verified as applied during reconcile",
-          recordedAt: new Date().toISOString(),
-          evidenceRef,
-        });
-      }
-      return this.transition(record, {
-        state: "SUCCEEDED",
-        stateReason: "RECONCILED_APPLIED_AND_VERIFIED",
-        lastStep: "reconcile.succeeded",
-        result: {
-          outcome: "succeeded",
-          partial: false,
-          message:
-            notes || "Interrupted action was verified as already applied",
-          verificationRefs: record.verification
-            .filter((v) => v.status === "passed")
-            .map((v) => v.checkId),
-        },
-        eventName: "run.settled",
-      });
-    }
-
+    // `effectState: applied` and an evidenceRef are caller assertions. They
+    // resolve whether replay is safe, but are not an independent readback.
+    // Keep mutating runs open for a trusted verification path.
+    record.requireVerification = true;
     return this.transition(record, {
       state: "VERIFYING",
       stateReason: "RECONCILED_APPLIED_AWAITING_VERIFICATION",

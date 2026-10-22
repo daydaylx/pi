@@ -59,7 +59,11 @@ may therefore be present even when a particular optional command returns
 | Permissions    | `permission.list`, `permission.set`                                                                      |
 | Commands       | `command.list`, `command.invoke`                                                                         |
 | State/services | `verification.run`, `changes.list`, `configuration.get`, `ui.respond`                                    |
-| Runs (Host)    | `run.submit`, `run.current`, `run.get`, `run.list`, `run.cancel`, `run.events`, `run.reconcile`, `run.resume`, `run.verify` |
+| Runs (Host)    | `run.submit`, `run.current`, `run.get`, `run.list`, `run.cancel`, `run.events`, `run.reconcile`, `run.resume` |
+
+`run.verify` remains a recognized protocol shape for compatibility, but the
+PiSystem Host rejects client submissions with `PERMISSION_DENIED`; only a
+host-side readback tied to the target may record positive verification.
 
 Session IDs are opaque. `session.list` never returns a session filename, and
 `session.open` accepts only an ID previously issued by the server.

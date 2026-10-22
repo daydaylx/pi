@@ -139,6 +139,40 @@ test("validates paged message parameters and results strictly", () => {
   );
 });
 
+test("pins the PiSystem run wire names and rejects retired aliases", () => {
+  assert.equal(
+    isValidRequestParams("run.submit", {
+      message: "Inspect the target",
+      clientSubmissionId: "pisystem-123",
+      requireVerification: true,
+    }),
+    true,
+  );
+  assert.equal(
+    isValidRequestParams("run.submit", {
+      message: "Inspect the target",
+      clientId: "client-1",
+      idempotencyKey: "key-1",
+      verificationRequired: true,
+    }),
+    false,
+  );
+  assert.equal(
+    isValidRequestParams("run.events", {
+      runId: "run_123",
+      afterRevision: 7,
+    }),
+    true,
+  );
+  assert.equal(
+    isValidRequestParams("run.events", {
+      runId: "run_123",
+      afterRunSeq: 7,
+    }),
+    false,
+  );
+});
+
 test("validates approval metadata and resolution outcomes", () => {
   const approval = {
     digest: "a".repeat(64),

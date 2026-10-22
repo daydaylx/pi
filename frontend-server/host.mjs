@@ -761,6 +761,7 @@ export class PiSystemHost {
     this.promptReservationTimer = setTimeout(() => {
       this.promptReserved = false;
       this.promptReservationTimer = undefined;
+      this.maybeStartNextQueuedRun();
     }, this.promptStartGraceMs);
     this.promptReservationTimer.unref?.();
   }
@@ -1106,25 +1107,9 @@ export class PiSystemHost {
       return;
     }
 
-    if (event === "verification.changed" && typeof data?.status === "string") {
-      const normalized = /pass|ok|success/i.test(data.status)
-        ? "passed"
-        : /fail|error|blocked/i.test(data.status)
-          ? "failed"
-          : "pending";
-      this.runStore.recordVerification(record, {
-        checkId: "runtime-verification",
-        status: normalized,
-        summary: `Runtime verification status: ${data.status}`,
-      });
-      const outEvent = TERMINAL_RUN_STATES.has(record.state)
-        ? "run.settled"
-        : "run.updated";
-      this.broadcastRunEvent(outEvent, record);
-      if (record.state === "SUCCEEDED") {
-        this.currentRunId = undefined;
-        this.maybeStartNextQueuedRun();
-      }
+    if (event === "verification.changed") {
+      // This status belongs to Pi's setup/project verification UI. It carries
+      // no target observation for the current system run and cannot settle it.
       return;
     }
 
@@ -1172,6 +1157,38 @@ export class PiSystemHost {
       });
       this.broadcastRunEvent("run.reconcile_required", record);
     }
+  }
+
+  recordTrustedRunVerification(runId, report) {
+    const record = this.runStore?.getRun(runId);
+    if (!record) return undefined;
+    if (
+      record.state !== "VERIFYING" ||
+      !report ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(report.checkId ?? "") ||
+      !["passed", "failed", "pending"].includes(report.status) ||
+      typeof report.summary !== "string" ||
+      !report.summary.trim() ||
+      (report.status === "passed" &&
+        (typeof report.evidenceRef !== "string" ||
+          !report.evidenceRef.trim() ||
+          !Array.isArray(report.source_of_truth) ||
+          report.source_of_truth.length === 0 ||
+          !Array.isArray(report.observations) ||
+          report.observations.length === 0))
+    ) {
+      return undefined;
+    }
+    this.runStore.recordVerification(record, report);
+    const outEvent = TERMINAL_RUN_STATES.has(record.state)
+      ? "run.settled"
+      : "run.updated";
+    this.broadcastRunEvent(outEvent, record);
+    if (TERMINAL_RUN_STATES.has(record.state)) {
+      if (this.currentRunId === record.runId) this.currentRunId = undefined;
+      if (record.state === "SUCCEEDED") this.maybeStartNextQueuedRun();
+    }
+    return toPublicRunSnapshot(record);
   }
 
   maybeStartNextQueuedRun() {
@@ -1430,33 +1447,12 @@ export class PiSystemHost {
       }
 
       if (method === "run.verify") {
-        const record = this.runStore.getRun(params.runId);
-        if (!record) {
-          this.sendClientError(
-            client,
-            id,
-            "RUN_NOT_FOUND",
-            `Run ${params.runId} not found`,
-          );
-          return;
-        }
-        this.runStore.recordVerification(record, params);
-        const outEvent = TERMINAL_RUN_STATES.has(record.state)
-          ? "run.settled"
-          : "run.updated";
-        if (
-          TERMINAL_RUN_STATES.has(record.state) &&
-          this.currentRunId === record.runId
-        ) {
-          this.currentRunId = undefined;
-        }
-        this.broadcastRunEvent(outEvent, record);
-        if (record.state === "SUCCEEDED") {
-          this.maybeStartNextQueuedRun();
-        }
-        this.sendClientResult(client, id, method, {
-          run: toPublicRunSnapshot(record),
-        });
+        this.sendClientError(
+          client,
+          id,
+          "PERMISSION_DENIED",
+          "Client-supplied verification is not trusted; only a host readback tied to the target may verify a run",
+        );
         return;
       }
 
