@@ -162,6 +162,9 @@ export const setupCoreSections = {
 
   "setup core lifecycle": async (context) => {
     const { section, contextDiagnostics, setupCore, trackedExec } = context;
+    const devPackageVersion = JSON.parse(
+      readFileSync(path.join(ROOT, "npm/package.json"), "utf8"),
+    ).devDependencies["@earendil-works/pi-coding-agent"];
 
     await section("setup core lifecycle", async () => {
       if (!setupCore) return;
@@ -229,7 +232,9 @@ export const setupCoreSections = {
         assert(
           harness.notifications
             .at(-1)
-            ?.message?.includes("Pi CLI/dev package: 0.80.7/1.2.0") &&
+            ?.message?.includes(
+              `Pi CLI/dev package: 0.80.7/${devPackageVersion}`,
+            ) &&
             harness.notifications
               .at(-1)
               ?.message?.includes("WARNING: Pi CLI, Manifest") &&

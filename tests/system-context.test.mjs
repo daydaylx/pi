@@ -16,6 +16,13 @@ import { importModule, npmModuleFile } from "./shared/jiti-loader.mjs";
 const collector = await importModule("extensions/system-context/collector.mjs");
 const extension = await importModule("extensions/system-context/index.ts");
 const repos = await importModule("extensions/system-context/repos.mjs");
+const sharedWorkContract = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../APPEND_SYSTEM.md",
+  ),
+  "utf8",
+);
 const results = [];
 
 function test(name, fn) {
@@ -449,7 +456,11 @@ async function main() {
     const hook = harness.hooks.get("before_agent_start")?.[0];
     assert.ok(hook, "before_agent_start registered");
     const result = hook(
-      { prompt, systemPrompt: "BASE", messageType: "user" },
+      {
+        prompt,
+        systemPrompt: extra.systemPrompt ?? "BASE",
+        messageType: "user",
+      },
       { cwd: "/tmp" },
     );
     return { result, collected };
@@ -463,6 +474,22 @@ async function main() {
       const { result, collected } = runPrompt("project", prompt);
       assert.equal(result, undefined, prompt);
       assert.deepEqual(collected, [], prompt);
+    }
+  });
+  test("shared work contract reaches both effective profile prompts", () => {
+    assert.match(sharedWorkContract, /## Eigenständige Problemlösung/);
+    assert.match(sharedWorkContract, /ausdrücklich\s+lesenden Aufträgen/);
+    for (const profile of ["project", "system"]) {
+      const { result } = runPrompt(profile, "Hallo", {
+        systemPrompt: sharedWorkContract,
+      });
+      const effective = result?.systemPrompt ?? sharedWorkContract;
+      assert.ok(effective.includes("## Eigenständige Problemlösung"), profile);
+      assert.match(effective, /Eine\s+Maßnahmenliste ersetzt/, profile);
+      assert.match(effective, /Umgehe\s+keine Permission-/, profile);
+      if (profile === "system")
+        assert.ok(effective.includes("[SYSTEM WORK CONTRACT]"));
+      else assert.ok(!effective.includes("[SYSTEM WORK CONTRACT]"));
     }
   });
   test("project profile loads system context only for clear system requests", () => {
@@ -575,10 +602,7 @@ async function testEffectivePrompt() {
     writeFileSync(path.join(temp, "AGENTS.md"), "ANCESTOR_SENTINEL");
     writeFileSync(path.join(cwd, "CLAUDE.md"), "PROJECT_SENTINEL");
     writeFileSync(path.join(agentDir, "AGENTS.md"), "GLOBAL_SENTINEL");
-    writeFileSync(
-      path.join(agentDir, "APPEND_SYSTEM.md"),
-      "COMMUNICATION_SENTINEL",
-    );
+    writeFileSync(path.join(agentDir, "APPEND_SYSTEM.md"), sharedWorkContract);
     for (const profile of ["system", "project"]) {
       const loader = new DefaultResourceLoader({
         cwd,
@@ -639,7 +663,8 @@ async function testEffectivePrompt() {
         ]) {
           const result = await runner.emitBeforeAgentStart(trigger, base);
           const prompt = buildSystemPrompt(result.systemPromptOptions);
-          assert.match(prompt, /COMMUNICATION_SENTINEL/);
+          assert.match(prompt, /## Eigenständige Problemlösung/);
+          assert.match(prompt, /Eine\s+Maßnahmenliste ersetzt/);
           assert.match(prompt, /nixos-system/);
           if (profile === "system") {
             assert.equal(prompt.split("[SYSTEM WORK CONTRACT]").length - 1, 1);
@@ -653,6 +678,10 @@ async function testEffectivePrompt() {
             );
             assert.match(prompt, /Anschlussfragen setzen die Untersuchung/);
             assert.match(prompt, /kleine Informationsfrage/);
+            assert.match(
+              prompt,
+              /bestätigte, im Auftrag liegende Systemfehler/,
+            );
             assert.match(
               prompt,
               /teilweise erledigt wegen nachgewiesener Blockade/,

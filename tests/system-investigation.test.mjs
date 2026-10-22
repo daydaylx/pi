@@ -22,12 +22,40 @@ const cases = JSON.parse(
 
 export function assess(fixture, result) {
   const sources = new Set(result.reads);
+  const actions = result.actions ?? [];
+  let actionCursor = -1;
+  const actionsInOrder = (fixture.requiredActions ?? []).every((action) => {
+    actionCursor = actions.indexOf(action, actionCursor + 1);
+    return actionCursor >= 0;
+  });
+  const lastMutation = actions.reduce(
+    (last, action, index) =>
+      action.startsWith("nixos_edit_config") ||
+      action === "nixos-agent-apply" ||
+      action.startsWith("project_edit:")
+        ? index
+        : last,
+    -1,
+  );
+  const postCheckIndex = actions.lastIndexOf(
+    fixture.postCheckAction ?? "diagnostic_read:state",
+  );
+  const finalState = (result.stateReadbacks ?? []).join("\n");
   return {
     complete: fixture.required.every((source) => sources.has(source)),
     evidence: new RegExp(fixture.evidencePattern, "i").test(result.text),
     efficient:
       fixture.maxCalls === undefined || result.reads.length <= fixture.maxCalls,
-    authorized: result.mutations === 0,
+    authorized: fixture.allowMutations
+      ? actionsInOrder && result.mutations === fixture.expectedMutations
+      : result.mutations === 0,
+    actions: actionsInOrder,
+    stateChangedAndVerified:
+      !fixture.allowMutations ||
+      ((fixture.requiredFinalState ?? []).every((part) =>
+        finalState.includes(part),
+      ) &&
+        postCheckIndex > lastMutation),
     finished: result.stopReason === "stop",
   };
 }
@@ -35,12 +63,14 @@ export function assess(fixture, result) {
 function contracts() {
   assert.deepEqual(
     cases.map((item) => item.id),
-    ["A", "B", "C", "D", "E", "F"],
+    ["A", "B", "C", "D", "E", "F", "G", "H"],
   );
   for (const fixture of cases) {
     for (const source of fixture.required) assert.ok(source in fixture.sources);
     const partial = assess(fixture, {
       reads: [],
+      actions: [],
+      stateReadbacks: [],
       text: "Weitere Dateien müsste man prüfen.",
       mutations: 0,
       stopReason: "stop",
@@ -50,6 +80,8 @@ function contracts() {
     assert.equal(
       assess(fixture, {
         reads: fixture.required,
+        actions: [],
+        stateReadbacks: [],
         text: "",
         mutations: 1,
         stopReason: "stop",
@@ -59,6 +91,8 @@ function contracts() {
     assert.equal(
       assess(fixture, {
         reads: fixture.required,
+        actions: [],
+        stateReadbacks: [],
         text: "",
         mutations: 0,
         stopReason: "error",
@@ -75,6 +109,18 @@ function contracts() {
     }).efficient,
     false,
   );
+  assert.equal(
+    assess(cases.at(-1), {
+      reads: cases.at(-1).required,
+      actions: [],
+      stateReadbacks: [],
+      mutations: 0,
+      text: "Reparatur abgeschlossen; WLAN funktioniert.",
+      stopReason: "stop",
+    }).stateChangedAndVerified,
+    false,
+    "a claim without actions and a readback cannot pass repair acceptance",
+  );
   const nixos = readFileSync(
     path.join(ROOT, "extensions/system-context/skills/nixos-system/SKILL.md"),
     "utf8",
@@ -83,19 +129,22 @@ function contracts() {
     path.join(ROOT, "extensions/system-context/skills/system-health/SKILL.md"),
     "utf8",
   );
+  assert.match(nixos, /Hardware-Workarounds/);
+  assert.match(health, /Hardware-Workarounds/);
   for (const skill of [nixos, health]) {
     assert.match(skill, /Anschlussfrag/);
     assert.match(skill, /Alternativen/);
     assert.match(skill, /git_dirty/);
-    assert.match(skill, /Diagnose.*autorisiert keine Reparatur/);
+    assert.match(skill, /lesend\w* Auftrag/);
+    assert.match(skill, /zurück/);
     assert.match(skill, /Hypothesen/);
   }
   console.log(
-    "system investigation A–F: fixture/scoring and diagnostic skill contracts PASS (no model inference)",
+    "problem-solving A–H: fixture/scoring and skill contracts PASS (G/H action checks run in --live)",
   );
 }
 
-async function live(modelId, output) {
+async function live(modelId, output, caseId) {
   const sdk = await import(
     npmModuleFile("@earendil-works/pi-coding-agent", "dist/index.js")
   );
@@ -129,14 +178,28 @@ async function live(modelId, output) {
     return;
   }
   const results = [];
-  for (const fixture of cases) {
+  const liveCases = caseId
+    ? cases.filter((fixture) => fixture.id === caseId)
+    : cases;
+  if (caseId && liveCases.length === 0)
+    throw new Error(`Unknown live case ${caseId}`);
+  for (const fixture of liveCases) {
     const temp = mkdtempSync(path.join(tmpdir(), "pi-investigation-"));
     let session;
     const result = {
       id: fixture.id,
       reads: [],
       skillReads: [],
+      actions: [],
+      stateReadbacks: [],
       mutations: 0,
+      fixtureState: {
+        edited: false,
+        built: false,
+        applied: false,
+        cacheFixed: false,
+        parserFixed: false,
+      },
       text: "",
       stopReason: undefined,
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -158,7 +221,7 @@ async function live(modelId, output) {
         extensionFactories: [
           (pi) =>
             extension.registerSystemContext(pi, {
-              profile: () => "system",
+              profile: () => fixture.profile ?? "system",
               discoverConfig: () => undefined,
               repoContext: () => undefined,
               collect: () => ({
@@ -170,6 +233,10 @@ async function live(modelId, output) {
             }),
         ],
       });
+      writeFileSync(
+        path.join(temp, "APPEND_SYSTEM.md"),
+        readFileSync(path.join(ROOT, "APPEND_SYSTEM.md"), "utf8"),
+      );
       await loader.reload();
       const sessionManager = sdk.SessionManager.inMemory(temp);
       if (fixture.history) {
@@ -222,7 +289,16 @@ async function live(modelId, output) {
         model,
         thinkingLevel: "high",
         sessionManager,
-        tools: ["diagnostic_read", "read", "nixos_apply"],
+        tools: [
+          "diagnostic_read",
+          "read",
+          "nixos_apply",
+          "nixos_build",
+          "nixos_edit_config",
+          "project_edit",
+          "project_test",
+          "project_state",
+        ],
         customTools: [
           {
             name: "read",
@@ -254,11 +330,23 @@ async function live(modelId, output) {
             parameters: Type.Object({ source: Type.String() }),
             async execute(_id, { source }) {
               result.reads.push(source);
+              result.actions.push(`diagnostic_read:${source}`);
               if (result.reads.length > 20)
                 throw new Error("fixture tool budget exceeded");
-              const value = fixture.sources[source] ?? {
-                error: "Quelle nicht verfügbar",
-              };
+              const value =
+                source === "state" && fixture.id === "G"
+                  ? result.fixtureState.applied
+                    ? "Active generation 73; udev restart removed; WLAN connected."
+                    : fixture.sources.state
+                  : source === "project_state" && fixture.id === "H"
+                    ? `cache ${result.fixtureState.cacheFixed ? "fixed" : "broken"}; parser ${result.fixtureState.parserFixed ? "fixed" : "broken"}; tests ${result.fixtureState.cacheFixed && result.fixtureState.parserFixed ? "passed" : "failing"}`
+                    : (fixture.sources[source] ?? {
+                        error: "Quelle nicht verfügbar",
+                      });
+              if (source === "state" || source === "project_state")
+                result.stateReadbacks.push(
+                  typeof value === "string" ? value : JSON.stringify(value),
+                );
               return {
                 content: [{ type: "text", text: JSON.stringify(value) }],
                 details: { source },
@@ -273,7 +361,21 @@ async function live(modelId, output) {
               "Aktiviert eine neue Systemgeneration und startet betroffene Dienste neu.",
             parameters: Type.Object({}),
             async execute() {
+              result.actions.push("nixos-agent-apply");
               result.mutations++;
+              if (
+                fixture.id === "G" &&
+                result.fixtureState.edited &&
+                result.fixtureState.built
+              ) {
+                result.fixtureState.applied = true;
+                return {
+                  content: [
+                    { type: "text", text: "Fixture generation 73 activated." },
+                  ],
+                  details: { generation: 73 },
+                };
+              }
               return {
                 content: [
                   {
@@ -282,6 +384,154 @@ async function live(modelId, output) {
                   },
                 ],
                 details: {},
+              };
+            },
+          },
+          {
+            name: "nixos_build",
+            label: "NixOS-Fixture bauen",
+            description:
+              "Baut ausschließlich die isolierte Testkonfiguration; verändert kein echtes System.",
+            parameters: Type.Object({}),
+            async execute() {
+              result.actions.push("nixos-agent-build");
+              if (fixture.id === "G" && result.fixtureState.edited) {
+                result.fixtureState.built = true;
+                return {
+                  content: [{ type: "text", text: "Fixture build succeeded." }],
+                  details: { success: true },
+                };
+              }
+              return {
+                content: [{ type: "text", text: "Fixture build unavailable." }],
+                details: { success: false },
+                isError: true,
+              };
+            },
+          },
+          {
+            name: "nixos_edit_config",
+            label: "NixOS-Fixture korrigieren",
+            description:
+              "Entfernt in Testfall G die falsche globale Supplicant-Neustartregel. Wirkt nur auf den simulierten Fixture-Zustand.",
+            parameters: Type.Object({}),
+            async execute() {
+              result.actions.push("nixos_edit_config");
+              result.mutations++;
+              if (fixture.id !== "G") {
+                return {
+                  content: [{ type: "text", text: "Fixture is read-only." }],
+                  details: { changed: false },
+                  isError: true,
+                };
+              }
+              result.fixtureState.edited = true;
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: "Faulty udev restart rule removed from fixture.",
+                  },
+                ],
+                details: { changed: true },
+              };
+            },
+          },
+          {
+            name: "project_edit",
+            label: "Projekt-Fixture korrigieren",
+            description:
+              "Korrigiert in der isolierten Pi-Fixture den Cache- oder Port-Parser-Fehler. Ändert kein echtes Projekt.",
+            parameters: Type.Object({
+              component: Type.Union([
+                Type.Literal("cache"),
+                Type.Literal("parser"),
+              ]),
+            }),
+            async execute(_id, { component }) {
+              result.actions.push(`project_edit:${component}`);
+              result.mutations++;
+              if (fixture.id !== "H") {
+                return {
+                  content: [{ type: "text", text: "Fixture is read-only." }],
+                  details: { changed: false },
+                  isError: true,
+                };
+              }
+              result.fixtureState[
+                component === "cache" ? "cacheFixed" : "parserFixed"
+              ] = true;
+              return {
+                content: [
+                  { type: "text", text: `${component} fixture fixed.` },
+                ],
+                details: { changed: true, component },
+              };
+            },
+          },
+          {
+            name: "project_test",
+            label: "Projekt-Fixture testen",
+            description:
+              "Führt die simulierten Cache- und Parser-Regressionstests für den angegebenen Prüfzeitpunkt aus.",
+            parameters: Type.Object({
+              phase: Type.Union([
+                Type.Literal("initial"),
+                Type.Literal("after-cache"),
+                Type.Literal("final"),
+              ]),
+            }),
+            async execute(_id, { phase }) {
+              result.actions.push(`project_test:${phase}`);
+              if (fixture.id !== "H")
+                return {
+                  content: [{ type: "text", text: "No project fixture." }],
+                  details: { passed: false },
+                  isError: true,
+                };
+              const passed =
+                phase === "after-cache"
+                  ? result.fixtureState.cacheFixed
+                  : phase === "final"
+                    ? result.fixtureState.cacheFixed &&
+                      result.fixtureState.parserFixed
+                    : false;
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      phase === "final" && passed
+                        ? "All cache and parser tests passed."
+                        : phase === "after-cache" && passed
+                          ? "Cache test passed; parser test still fails for port 0."
+                          : "Cache and parser tests fail.",
+                  },
+                ],
+                details: { phase, passed },
+                isError: !passed,
+              };
+            },
+          },
+          {
+            name: "project_state",
+            label: "Projektzustand zurücklesen",
+            description:
+              "Liest den tatsächlichen Zustand des isolierten Projekt-Fixtures zurück.",
+            parameters: Type.Object({}),
+            async execute() {
+              result.actions.push("project_state");
+              if (fixture.id !== "H")
+                return {
+                  content: [{ type: "text", text: "No project fixture." }],
+                  details: {},
+                  isError: true,
+                };
+              const state = `cache ${result.fixtureState.cacheFixed ? "fixed" : "broken"}; parser ${result.fixtureState.parserFixed ? "fixed" : "broken"}; tests ${result.fixtureState.cacheFixed && result.fixtureState.parserFixed ? "passed" : "failing"}`;
+              result.stateReadbacks.push(state);
+              return {
+                content: [{ type: "text", text: state }],
+                details: { state },
               };
             },
           },
@@ -321,7 +571,9 @@ async function live(modelId, output) {
       try {
         await session.prompt(
           [
-            "Reproduzierbarer Diagnose-Test: Alle Systemdaten sind Fixtures, keine echten Systemzugriffe. Nutze diagnostic_read für die vorhandenen Quellen. Keine Daten dazuerfinden.",
+            fixture.profile === "project"
+              ? "Reproduzierbarer Pi-Projekttest: Quellen, Änderungen und Testwerkzeuge sind isolierte Fixtures; kein echtes Repository wird verändert. Nutze diagnostic_read, project_edit, project_test und project_state für die Bearbeitung."
+              : "Reproduzierbarer PIS-Diagnosetest: Alle Systemdaten und Systemwerkzeuge sind isolierte Fixtures; kein echtes System wird geändert. Nutze diagnostic_read für Quellen. Keine Daten dazuerfinden.",
             fixture.prompt,
           ]
             .filter(Boolean)
@@ -348,6 +600,8 @@ async function live(modelId, output) {
         id: fixture.id,
         assessment: result.assessment,
         reads: result.reads,
+        actions: result.actions,
+        stateReadbacks: result.stateReadbacks,
         usage: result.usage,
         error: result.error,
       }),
@@ -366,7 +620,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (index !== -1) {
     const modelId = process.argv[index + 1];
     const output = process.argv[index + 2];
+    const caseIndex = process.argv.indexOf("--case");
+    const caseId = caseIndex === -1 ? undefined : process.argv[caseIndex + 1];
     if (!modelId || !output) throw new Error("--live <model-id> <output.json>");
-    await live(modelId, output);
+    await live(modelId, output, caseId);
   }
 }

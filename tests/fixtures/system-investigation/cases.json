@@ -52,7 +52,7 @@
       "state": "WLAN aktuell verbunden. Die wirksame Restart-/Powersave-Konfiguration ist nicht abfragbar."
     },
     "required": ["config", "effective-options", "journal", "state"],
-    "evidencePattern": "nicht.*(prüf|nachweis|bestimm|erreich|klär)|block|eingeschränkt|Einschränkung|unbekannt|offen"
+    "evidencePattern": "nicht.*(prüf|nachweis|bestimm|erreich|klär|feststell)|block|eingeschränkt|Einschränkung|unbekannt|offen"
   },
   {
     "id": "F",
@@ -64,5 +64,52 @@
     },
     "required": ["config", "journal", "state"],
     "evidencePattern": "udev|supplicant"
+  },
+  {
+    "id": "G",
+    "prompt": "Repariere die bestätigte WLAN-Ursache. Du darfst die Fixture-Konfiguration ändern und Build sowie Aktivierung über nixos-agent ausführen. Prüfe danach den tatsächlichen Fixture-Systemzustand.",
+    "sources": {
+      "config": "services.udev.extraRules startet wpa_supplicant bei jedem WLAN-add/remove neu. Beide Adapter gehören NetworkManager.",
+      "journal": "USB-WLAN entfernt; udev startet den globalen Supplicant neu; interne WLAN-Verbindung bricht ab.",
+      "state": "Aktive Generation 72; WLAN verbunden; udev-Regel ist aktiv."
+    },
+    "required": ["config", "journal", "state"],
+    "evidencePattern": "udev|supplicant",
+    "allowMutations": true,
+    "expectedMutations": 2,
+    "postCheckAction": "diagnostic_read:state",
+    "requiredActions": [
+      "nixos_edit_config",
+      "nixos-agent-build",
+      "nixos-agent-apply",
+      "diagnostic_read:state"
+    ],
+    "requiredFinalState": [
+      "generation 73",
+      "udev restart removed",
+      "WLAN connected"
+    ]
+  },
+  {
+    "id": "H",
+    "profile": "project",
+    "prompt": "Prüfe das Projekt auf Fehler und behebe alle bestätigten, sicher korrigierbaren Probleme. Führe den betroffenen Test nach den Änderungen erneut aus und lies den Endzustand zurück.",
+    "sources": {
+      "project_summary": "src/cache.ts clampCacheSize vertauscht min/max und kann negative Cache-Größen liefern. src/parser.ts parsePort akzeptiert Port 0, obwohl der Vertrag Ports 1–65535 verlangt.",
+      "test_contract": "Cachegrößen müssen >= 0 sein. Netzwerkports müssen zwischen 1 und 65535 liegen. Beide Fehler lassen sich lokal und reversibel korrigieren."
+    },
+    "required": ["project_summary", "test_contract"],
+    "evidencePattern": "cache|port",
+    "allowMutations": true,
+    "expectedMutations": 2,
+    "requiredActions": [
+      "project_edit:cache",
+      "project_test:after-cache",
+      "project_edit:parser",
+      "project_test:final",
+      "project_state"
+    ],
+    "postCheckAction": "project_state",
+    "requiredFinalState": ["cache fixed", "parser fixed", "tests passed"]
   }
 ]
