@@ -24,6 +24,7 @@ import {
   TERMINAL_RUN_STATES,
   toPublicRunSnapshot,
 } from "./runs.mjs";
+import { releaseApplyJob } from "./state-readback.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_FRONTEND = path.join(ROOT, "bin", "pi-frontend");
@@ -909,6 +910,19 @@ export class PiSystemHost {
   }
 
   broadcastRunEvent(eventName, record, extra = {}) {
+    if (TERMINAL_RUN_STATES.has(record.state)) {
+      for (const action of record.actions) {
+        if (
+          action.externalJobId &&
+          action.jobInvocationId &&
+          !action.jobReleased &&
+          releaseApplyJob(action.externalJobId, action.jobInvocationId)
+        ) {
+          action.jobReleased = true;
+          this.runStore.persist(record);
+        }
+      }
+    }
     if (!record) return;
     const payload = {
       run: toPublicRunSnapshot(record),
@@ -1085,7 +1099,10 @@ export class PiSystemHost {
                   data.targetPath,
                 ),
               }
-            : undefined,
+            : data?.toolName === "system_job"
+              ? { action: data?.jobAction }
+              : undefined,
+        systemTarget: data?.systemTarget,
       });
       this.broadcastRunEvent("run.updated", record);
       return;
@@ -1096,7 +1113,28 @@ export class PiSystemHost {
         toolCallId: data?.toolCallId,
         toolName: data?.toolName,
         isError: event === "tool.failed" || data?.isError === true,
+        externalJobId: data?.jobId,
       });
+      if (
+        data?.toolName === "system_state_verify" &&
+        event === "tool.completed" &&
+        data?.stateGoalCheck &&
+        data?.isError !== true
+      ) {
+        try {
+          this.runStore.verifySystemReadback(record, {
+            goal: data.stateGoalCheck,
+            checkId: `state-readback:${data.toolCallId}`,
+          });
+        } catch {
+          this.runStore.recordVerification(record, {
+            checkId: `state-readback:${data.toolCallId}`,
+            status: "failed",
+            summary:
+              "Host could not independently read back the requested system goal",
+          });
+        }
+      }
       if (
         data?.toolName === "system_file_verify" &&
         event === "tool.completed" &&

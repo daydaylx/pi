@@ -123,6 +123,34 @@ in [PIS-Untersuchungen](pis-investigation.md).
 
 ## System-Control-Werkzeuge
 
+Vor einer Änderung leitet das Systemprofil konkrete Erfolgskriterien aus dem
+Nutzerziel ab und prüft sie am tatsächlichen Zustand. Der Arbeitsvertrag wird
+über denselben `before_agent_start`-Hook in TUI und Host geladen. Ein neuer
+Checkout aktualisiert eine bereits laufende Installation nicht automatisch.
+
+Für reguläre Dateien vergleicht `system_file_verify` den Inhalt mit dem zuvor
+aus dem Ziel abgeleiteten SHA-256. `system_state_verify` unterstützt drei feste
+Prädikate: Benutzerdienst gestartet/gestoppt/neu gestartet, aktive
+Hyprland-Arbeitsfläche und laufender NixOS-Store-Pfad. Der Host wiederholt diese
+Prüfung unabhängig und bindet sie an passende abgeschlossene typisierte
+Aktionen. Ein Dienstneustart braucht eine neue InvocationID. Ohne passende
+Aktion bleibt der Nachweis `pending`; beliebige Shell-Aktionen werden nicht
+dadurch abgedeckt. Neue Mutationen entwerten frühere positive Nachweise.
+
+`nixos_apply` akzeptiert optional `expectedSystem` als exakten Ziel-Store-Pfad.
+Die eigene transiente Apply-Unit bleibt mit `RemainAfterExit=yes` abfragbar.
+Ein positiver Host-Nachweis verlangt zusätzlich zur laufenden Zielgeneration
+den erfolgreichen Endstatus genau dieses Jobs samt Exit-Code 0. Laufende oder
+nicht mehr belegbare Jobs bleiben ungeprüft, fehlgeschlagene Jobs sind Fehler.
+Nach einem terminalen Run gibt der Host nur bereits erfolgreich abgeschlossene
+eigene Units mit erneut bestätigter InvocationID frei. Ein Abbruch ohne
+Job-Endbeleg wird `UNCERTAIN`; er behauptet keinen gestoppten externen Job.
+`system_job` mit `status` oder `output` ist lesend, `stop` bleibt mutierend.
+
+Diese Prädikate sind kein allgemeiner Beweis beliebiger natürlichsprachlicher
+Ziele. Nicht abgedeckte Teilziele und Aktionen müssen als Einschränkung oder
+offener Prüfbedarf erhalten bleiben.
+
 `system-control` registriert in beiden Profilen typed Werkzeuge (im Projektprofil `pi` bleiben sie inaktiv, bis der Prompt Systemarbeit verlangt, siehe ADR 038) für Status und Journal (`system_unit_status`, `system_journal`, `nixos_status`, `desktop_state`, `audio_status`, `system_job`) sowie Benutzeraktionen (`desktop_switch_workspace`, `desktop_focus_window`, `audio_set_volume`, `notify`, `user_service`, `nixos_build`, `nixos_apply`). Im Projektprofil gelten die gewählten Permission-Stufen. `pis` führt diese Tool-Aufrufe ohne Pi-seitige Bestätigung aus.
 
 Die Werkzeuge rufen feste Programme mit argv-Arrays und minimaler Kindumgebung auf. Die Bash- und Datei-Guards von Pi blockieren im Profil `pis` keine Aufrufe. Tool-spezifische Eingabevalidierung und Betriebssystemrechte gelten weiterhin.

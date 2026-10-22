@@ -1,4 +1,10 @@
 import { readFileGoal } from "./file-readback.mjs";
+import {
+  normalizeSystemGoal,
+  readApplyJob,
+  readSystemGoal,
+  systemGoalForTool,
+} from "./state-readback.mjs";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -76,16 +82,18 @@ const READ_ONLY_TOOLS = new Set([
   "desktop_state",
   "audio_status",
   "system_file_verify",
+  "system_state_verify",
 ]);
 const MAX_RUN_EVENTS = 200;
 // Only an actual host-side readback can create positive goal evidence.
 const READBACK_PROOF = Symbol("host-readback");
+const HOST_PROOF_KINDS = new Set(["host-file-sha256", "host-system-state"]);
 
 function sanitizeTitle(raw, fallback = "Systemauftrag") {
   if (typeof raw !== "string") return fallback;
   const firstLine = raw
     .split(/\r?\n/)[0]
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\p{Cc}+/gu, " ")
     .trim();
   if (!firstLine) return fallback;
   return firstLine.length > 160 ? `${firstLine.slice(0, 157)}...` : firstLine;
@@ -229,7 +237,8 @@ function applyOperatorReportFields(
 
 export function toPublicRunSnapshot(record) {
   normalizeRunRecord(record);
-  const { pendingMessage, ...rest } = record;
+  const rest = { ...record };
+  delete rest.pendingMessage;
   return structuredClone({
     schemaVersion: rest.schemaVersion,
     runId: rest.runId,
@@ -298,7 +307,14 @@ export function toPublicRunSummary(record) {
 }
 
 export class RunStore {
-  constructor({ runsDir, hostEpoch }) {
+  constructor({
+    runsDir,
+    hostEpoch,
+    stateReader = readSystemGoal,
+    jobReader = readApplyJob,
+  }) {
+    this.stateReader = stateReader;
+    this.jobReader = jobReader;
     if (!runsDir || !path.isAbsolute(runsDir)) {
       throw new Error("runsDir must be an absolute path");
     }
@@ -534,7 +550,7 @@ export class RunStore {
       lastStep: queued ? "queued" : "accepted",
       queued: queued === true,
       requireVerification: requireVerification === true,
-      ...(queued || true ? { pendingMessage: message } : {}),
+      pendingMessage: message,
       source_of_truth: [],
       actions: [],
       observations: [],
@@ -575,14 +591,16 @@ export class RunStore {
 
   recordToolStarted(
     record,
-    { toolCallId, toolName, args, externalJob = false },
+    { toolCallId, toolName, args, systemTarget, externalJob = false },
   ) {
     normalizeRunRecord(record);
     const now = new Date().toISOString();
     const mutating =
-      MUTATING_TOOLS.has(toolName) ||
-      !READ_ONLY_TOOLS.has(toolName) ||
-      externalJob === true;
+      toolName === "system_job"
+        ? !["status", "output"].includes(args?.action)
+        : MUTATING_TOOLS.has(toolName) ||
+          !READ_ONLY_TOOLS.has(toolName) ||
+          externalJob === true;
     const action = {
       actionId: `act_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
       toolCallId: String(toolCallId || `tc_${record.actions.length + 1}`),
@@ -598,6 +616,30 @@ export class RunStore {
       effectState: "executing",
     };
     record.actions.push(action);
+    const target = systemTarget ?? systemGoalForTool(toolName, args);
+    if (target) {
+      const normalized = normalizeSystemGoal(target);
+      // Do not let a target for another tool grant coverage to shell commands.
+      const supported = {
+        "user-service": "user_service",
+        workspace: "desktop_switch_workspace",
+        "nixos-generation": "nixos_apply",
+      };
+      if (supported[normalized.kind] === toolName) {
+        action.systemTarget = normalized;
+        if (
+          normalized.kind === "user-service" &&
+          normalized.operation === "restart"
+        ) {
+          try {
+            action.beforeInvocationId =
+              this.stateReader(normalized).observation.invocationId;
+          } catch {
+            /* Without a baseline a restart remains unverified. */
+          }
+        }
+      }
+    }
     if (mutating) {
       // Retire stale positive evidence rather than leaving a pending check
       // that a later tool call (with a fresh check ID) could never replace.
@@ -630,7 +672,7 @@ export class RunStore {
     return this.persist(record);
   }
 
-  recordToolFinished(record, { toolCallId, toolName, isError }) {
+  recordToolFinished(record, { toolCallId, toolName, isError, externalJobId }) {
     normalizeRunRecord(record);
     const now = new Date().toISOString();
     const action =
@@ -641,12 +683,22 @@ export class RunStore {
 
     const resolvedName = String(toolName || action?.toolName || "unknown");
     if (action) {
+      if (
+        action.toolName === "nixos_apply" &&
+        typeof externalJobId === "string" &&
+        /^pi-job-[0-9a-f-]{36}$/.test(externalJobId)
+      ) {
+        action.externalJobId = externalJobId;
+        action.externalJob = true;
+      }
       action.finishedAt = now;
       action.effectState = isError
         ? "failed"
-        : action.mutating
-          ? "applied"
-          : "not_applied";
+        : action.externalJobId
+          ? "executing"
+          : action.mutating
+            ? "applied"
+            : "not_applied";
       if (!isError && !action.mutating) {
         addUniqueBounded(
           record.observations,
@@ -685,6 +737,7 @@ export class RunStore {
       remaining_issues,
     },
     proof,
+    proofDetails,
   ) {
     if (status === "passed" && proof !== READBACK_PROOF) {
       const error = new Error(
@@ -721,16 +774,18 @@ export class RunStore {
       recordedAt: now,
       ...(proof === READBACK_PROOF
         ? {
-            proofKind: "host-file-sha256",
-            coveredActionIds: record.actions
-              .filter(
-                (a) =>
-                  a.mutating &&
-                  a.targetPath === source_of_truth?.[0] &&
-                  a.finishedAt &&
-                  a.effectState === "applied",
-              )
-              .map((a) => a.actionId),
+            proofKind: proofDetails?.proofKind ?? "host-file-sha256",
+            coveredActionIds:
+              proofDetails?.coveredActionIds ??
+              record.actions
+                .filter(
+                  (a) =>
+                    a.mutating &&
+                    a.targetPath === source_of_truth?.[0] &&
+                    a.finishedAt &&
+                    a.effectState === "applied",
+                )
+                .map((a) => a.actionId),
           }
         : {}),
       ...(typeof evidenceRef === "string" && evidenceRef.length > 0
@@ -761,7 +816,7 @@ export class RunStore {
           record.verification.some(
             (v) =>
               v.status === "passed" &&
-              v.proofKind === "host-file-sha256" &&
+              HOST_PROOF_KINDS.has(v.proofKind) &&
               v.coveredActionIds?.includes(a.actionId),
           ),
         ) &&
@@ -831,6 +886,108 @@ export class RunStore {
     );
   }
 
+  verifySystemReadback(record, { goal, checkId }) {
+    if (
+      !["VERIFYING", "INVESTIGATING", "EXECUTING"].includes(record.state) ||
+      !checkId
+    ) {
+      const error = new Error(
+        "Readback requires an executing or VERIFYING run",
+      );
+      error.code = "RUN_CONFLICT";
+      throw error;
+    }
+    const normalized = normalizeSystemGoal(goal);
+    const readback = this.stateReader(normalized);
+    const sameResource = (target) =>
+      target?.kind === normalized.kind &&
+      (normalized.kind !== "user-service" || target.unit === normalized.unit);
+    const resourceActions = record.actions.filter(
+      (action) => action.mutating && sameResource(action.systemTarget),
+    );
+    const latestTargetMatches =
+      JSON.stringify(resourceActions.at(-1)?.systemTarget) ===
+      JSON.stringify(normalized);
+    let jobPending = false;
+    let jobFailed = false;
+    if (normalized.kind === "nixos-generation") {
+      for (const action of resourceActions) {
+        try {
+          const job = this.jobReader(action.externalJobId);
+          if (!job.completed) jobPending = true;
+          else {
+            action.externalJobFinished = true;
+            action.finishedAt = new Date().toISOString();
+            action.effectState = job.passed ? "applied" : "failed";
+            if (!job.passed) jobFailed = true;
+            else action.jobInvocationId = job.invocationId;
+          }
+        } catch {
+          jobPending = true;
+        }
+      }
+    }
+    const coveredActionIds = record.actions
+      .filter((action) => {
+        if (
+          !latestTargetMatches ||
+          !action.mutating ||
+          !action.finishedAt ||
+          action.effectState !== "applied" ||
+          !sameResource(action.systemTarget)
+        )
+          return false;
+        if (
+          normalized.kind === "nixos-generation" &&
+          (jobPending || jobFailed || !action.jobInvocationId)
+        )
+          return false;
+        return (
+          action.systemTarget.kind !== "user-service" ||
+          action.systemTarget.operation !== "restart" ||
+          (typeof action.beforeInvocationId === "string" &&
+            typeof readback.observation.invocationId === "string" &&
+            readback.observation.invocationId.length > 0 &&
+            action.beforeInvocationId !== readback.observation.invocationId)
+        );
+      })
+      .map((action) => action.actionId);
+    const status = jobPending
+      ? "pending"
+      : !readback.passed || jobFailed
+        ? "failed"
+        : coveredActionIds.length === 0 || jobPending
+          ? "pending"
+          : "passed";
+    if (status === "passed") {
+      record.verification = record.verification.filter(
+        (check) =>
+          !(
+            check.status === "pending" &&
+            check.proofKind === "host-system-state" &&
+            check.evidenceRef === readback.source
+          ),
+      );
+    }
+    return this.recordVerification(
+      record,
+      {
+        checkId,
+        status,
+        summary:
+          status === "pending"
+            ? "System state observed, but matching completed action or apply-job evidence is missing"
+            : status === "passed"
+              ? "Host system readback matches the requested state"
+              : "Host system readback differs from the requested state",
+        source_of_truth: [readback.source],
+        evidenceRef: readback.source,
+      },
+      READBACK_PROOF,
+      { proofKind: "host-system-state", coveredActionIds },
+    );
+  }
+
   getEvents(record, afterRevision = 0) {
     const first = record.events[0]?.revision ?? record.revision;
     return {
@@ -858,7 +1015,7 @@ export class RunStore {
     const hasPassedVerification =
       record.verification.length > 0 &&
       record.verification.every(
-        (v) => v.status === "passed" && v.proofKind === "host-file-sha256",
+        (v) => v.status === "passed" && HOST_PROOF_KINDS.has(v.proofKind),
       ) &&
       record.actions
         .filter((a) => a.mutating && a.effectState !== "not_applied")
@@ -870,9 +1027,15 @@ export class RunStore {
         );
 
     if (aborted || record.state === "CANCELLING") {
-      if (hasInflightMutatingAction) {
+      if (
+        hasInflightMutatingAction ||
+        record.actions.some((a) => a.externalJobId && !a.externalJobFinished)
+      ) {
         for (const action of record.actions) {
-          if (!action.finishedAt) {
+          if (
+            !action.finishedAt ||
+            (action.externalJobId && !action.externalJobFinished)
+          ) {
             action.finishedAt = now;
             action.effectState = "unknown";
           }
@@ -961,8 +1124,9 @@ export class RunStore {
     }
 
     if (
-      (record.requireVerification || record.actions.some((a) => a.mutating)) &&
-      !hasPassedVerification
+      record.verification.some((v) => v.status === "pending") ||
+      ((record.requireVerification || record.actions.some((a) => a.mutating)) &&
+        !hasPassedVerification)
     ) {
       return this.transition(record, {
         state: "VERIFYING",
@@ -995,7 +1159,6 @@ export class RunStore {
     {
       effectState,
       notes,
-      evidenceRef,
       source_of_truth,
       observations,
       rollback,

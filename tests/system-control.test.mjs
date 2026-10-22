@@ -24,6 +24,57 @@ const { Value } = await import(
   pathToFileURL(npmModuleFile("typebox", "build/value/index.mjs")).href
 );
 
+test("system goal verification is profile-local and accepts only bounded typed predicates", () => {
+  const previous = process.env.PI_LAUNCH_PROFILE;
+  try {
+    process.env.PI_LAUNCH_PROFILE = "system";
+    const tools = new Map();
+    extension.default({ registerTool: (tool) => tools.set(tool.name, tool) });
+    const verify = tools.get("system_state_verify");
+    assert.ok(verify);
+    assert.ok(tools.has("system_file_verify"));
+    assert.equal(
+      Value.Check(verify.parameters, { kind: "workspace", workspace: 2 }),
+      true,
+    );
+    assert.equal(
+      Value.Check(verify.parameters, { kind: "workspace", workspace: 0 }),
+      false,
+    );
+    assert.equal(
+      Value.Check(verify.parameters, {
+        kind: "workspace",
+        workspace: 2,
+        passed: true,
+      }),
+      false,
+    );
+    assert.equal(
+      Value.Check(verify.parameters, {
+        kind: "user-service",
+        unit: "waybar.service",
+        operation: "restart",
+      }),
+      true,
+    );
+    assert.equal(
+      Value.Check(tools.get("nixos_apply").parameters, {
+        expectedSystem: "/tmp/system",
+      }),
+      false,
+    );
+    assert.equal(
+      Value.Check(tools.get("nixos_apply").parameters, {
+        expectedSystem: `/nix/store/${"a".repeat(32)}-nixos-system-test`,
+      }),
+      true,
+    );
+  } finally {
+    if (previous === undefined) delete process.env.PI_LAUNCH_PROFILE;
+    else process.env.PI_LAUNCH_PROFILE = previous;
+  }
+});
+
 function register(profile, exec = async () => ({ stdout: "ok", stderr: "" })) {
   const tools = new Map();
   const handlers = new Map();
@@ -616,7 +667,7 @@ test("Jede Aktion nutzt feste argv und eine minimale Kindumgebung", async () => 
     ]);
     assert.deepEqual(calls[13].args, [
       "--user",
-      "--collect",
+      "--property=RemainAfterExit=yes",
       "--quiet",
       calls[13].args[3],
       "--",

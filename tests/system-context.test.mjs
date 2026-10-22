@@ -689,6 +689,12 @@ async function testEffectivePrompt() {
               /SYSTEM ACCESS|Only readonly|host asks for confirmation/,
             );
             assert.match(prompt, /Anschlussfragen setzen die Untersuchung/);
+            assert.match(prompt, /konkrete Erfolgskriterien/);
+            assert.match(prompt, /system_state_verify/);
+            assert.match(
+              prompt,
+              /Erwartungswerte aus dem Auftrag vor der Änderung/,
+            );
             assert.match(prompt, /kleine Informationsfrage/);
             assert.match(
               prompt,

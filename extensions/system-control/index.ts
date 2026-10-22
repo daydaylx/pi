@@ -1,4 +1,5 @@
 import { readFileGoal } from "../../frontend-server/file-readback.mjs";
+import { readSystemGoal } from "../../frontend-server/state-readback.mjs";
 import { execFile as nodeExecFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -518,14 +519,26 @@ export function registerSystemControl(
         name === SYSTEM_CONTROL_TOOL.nixosBuild
           ? "Startet einen NixOS-Build in einer transienten User-Unit."
           : "Startet die freizugebende NixOS-Apply-Aktion in einer transienten User-Unit.",
-      parameters: Empty,
+      parameters:
+        name === SYSTEM_CONTROL_TOOL.nixosApply
+          ? strictObject({
+              expectedSystem: Type.Optional(
+                Type.String({
+                  pattern:
+                    "^/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9+._-]+$",
+                }),
+              ),
+            })
+          : Empty,
       run: async () => {
         const id = `pi-job-${randomUUID()}`;
         return {
           file: "systemd-run",
           args: [
             "--user",
-            "--collect",
+            ...(name === SYSTEM_CONTROL_TOOL.nixosApply
+              ? ["--property=RemainAfterExit=yes"]
+              : ["--collect"]),
             "--quiet",
             `--unit=${id}`,
             "--",
@@ -610,10 +623,53 @@ export default function systemControlExtension(pi: ExtensionAPI): void {
   registerSystemControl(pi);
   if (getPiLaunchProfile() === "system")
     pi.registerTool({
+      name: "system_state_verify",
+      label: "Systemziel unabhängig prüfen",
+      description:
+        "Independently read the requested user-service state, active Hyprland workspace, or running NixOS store path. Use after the matching typed mutation. A restart additionally requires a changed invocation observed by the host. Supply expectedSystem to nixos_apply to bind its exact generation goal. Arbitrary shell actions are not covered. Derive expectations from the user's goal, never from the observed state.",
+      parameters: Type.Union([
+        strictObject({
+          kind: Type.Literal("user-service"),
+          unit: Type.String({ pattern: UNIT.source }),
+          operation: Type.Union([
+            Type.Literal("start"),
+            Type.Literal("stop"),
+            Type.Literal("restart"),
+          ]),
+        }),
+        strictObject({
+          kind: Type.Literal("workspace"),
+          workspace: Type.Integer({ minimum: 1, maximum: 99 }),
+        }),
+        strictObject({
+          kind: Type.Literal("nixos-generation"),
+          expectedSystem: Type.String({
+            pattern: "^/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9+._-]+$",
+          }),
+        }),
+      ]),
+      async execute(_id, params) {
+        const check = readSystemGoal(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text: check.passed
+                ? "Requested system state observed"
+                : "Requested system state not observed",
+            },
+          ],
+          details: { stateGoalCheck: params },
+          isError: params.kind !== "nixos-generation" && !check.passed,
+        };
+      },
+    });
+  if (getPiLaunchProfile() === "system")
+    pi.registerTool({
       name: "system_file_verify",
       label: "Dateiziel unabhängig prüfen",
       description:
-        "Read back a regular file (max 16 MiB, no symlinks) and compare SHA-256 with the expected goal contents. Use after file mutations; derive the expected digest from the requested target, not from the current file. Other system goals remain unverified. No shell is executed.",
+        "Read back a regular file (max 16 MiB, no symlinks) and compare SHA-256 with the expected goal contents. Use after file mutations; derive the expected digest from the requested target, not from the current file. Use system_state_verify for supported system-state goals. No shell is executed.",
       parameters: Type.Object(
         {
           filePath: Type.String({ minLength: 1 }),

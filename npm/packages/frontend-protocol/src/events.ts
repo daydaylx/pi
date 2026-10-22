@@ -8,12 +8,52 @@ import { StatePatchV1Schema, StateSnapshotV1Schema } from "./state-schemas.js";
 const Strict = { additionalProperties: false } as const;
 const NonEmptyString = Type.String({ minLength: 1 });
 const Empty = Type.Object({}, Strict);
+const SystemStateGoal = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("user-service"),
+      unit: Type.String({
+        pattern: "^(?!-)[A-Za-z0-9_.@:-]{1,120}\\.service$",
+      }),
+      operation: Type.Union([
+        Type.Literal("start"),
+        Type.Literal("stop"),
+        Type.Literal("restart"),
+      ]),
+    },
+    Strict,
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("workspace"),
+      workspace: Type.Integer({ minimum: 1, maximum: 99 }),
+    },
+    Strict,
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("nixos-generation"),
+      expectedSystem: Type.String({
+        pattern: "^/nix/store/[a-z0-9]{32}-nixos-system-[A-Za-z0-9+._-]+$",
+      }),
+    },
+    Strict,
+  ),
+]);
 const MessageData = Type.Object({ message: PublicMessageSchema }, Strict);
 const ToolData = Type.Object(
   {
     toolCallId: NonEmptyString,
     toolName: NonEmptyString,
     targetPath: Type.Optional(NonEmptyString),
+    jobAction: Type.Optional(
+      Type.Union([
+        Type.Literal("status"),
+        Type.Literal("output"),
+        Type.Literal("stop"),
+      ]),
+    ),
+    systemTarget: Type.Optional(SystemStateGoal),
   },
   Strict,
 );
@@ -22,6 +62,8 @@ const ToolEndData = Type.Object(
     toolCallId: NonEmptyString,
     toolName: NonEmptyString,
     isError: Type.Boolean(),
+    jobId: Type.Optional(Type.String({ pattern: "^pi-job-[0-9a-f-]{36}$" })),
+    stateGoalCheck: Type.Optional(SystemStateGoal),
     goalCheck: Type.Optional(
       Type.Object(
         {

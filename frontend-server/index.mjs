@@ -15,6 +15,7 @@ import {
 import path, { extname } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { SessionManager } from "../npm/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
+import { systemGoalForTool } from "./state-readback.mjs";
 import {
   CAPABILITIES,
   PROTOCOL_PACKAGE_VERSION,
@@ -597,11 +598,17 @@ function publicRuntimeEvent(message) {
     };
   }
   if (message?.type === "tool_execution_start") {
+    const systemTarget = systemGoalForTool(message.toolName, message.args);
     return {
       event: "tool.started",
       data: {
         toolCallId: String(message.toolCallId ?? ""),
         toolName: String(message.toolName ?? ""),
+        ...(systemTarget ? { systemTarget } : {}),
+        ...(message.toolName === "system_job" &&
+        ["status", "output", "stop"].includes(message.args?.action)
+          ? { jobAction: message.args.action }
+          : {}),
         ...(["write", "edit"].includes(message.toolName) &&
         typeof message.args?.path === "string"
           ? { targetPath: message.args.path }
@@ -625,6 +632,15 @@ function publicRuntimeEvent(message) {
         toolCallId: String(message.toolCallId ?? ""),
         toolName: String(message.toolName ?? ""),
         isError: message.isError === true,
+        ...(message.toolName === "nixos_apply" &&
+        /^pi-job-[0-9a-f-]{36}$/.test(message.result?.details?.jobId ?? "")
+          ? { jobId: message.result.details.jobId }
+          : {}),
+        ...(message.toolName === "system_state_verify" &&
+        message.result?.details?.stateGoalCheck &&
+        !message.isError
+          ? { stateGoalCheck: message.result.details.stateGoalCheck }
+          : {}),
         ...(message.toolName === "system_file_verify" &&
         message.result?.details?.goalCheck &&
         !message.isError
@@ -1092,9 +1108,11 @@ export class FrontendServer {
 
   async emitInitialSnapshot(currentSession) {
     try {
-      const current = currentSession ?? normalizeCurrentSession(
-        await this.runtime.request({ type: "get_state" }),
-      );
+      const current =
+        currentSession ??
+        normalizeCurrentSession(
+          await this.runtime.request({ type: "get_state" }),
+        );
       this.state.session = {
         ...(current.id ? { id: current.id } : {}),
         ...(current.name ? { name: current.name } : {}),
@@ -1240,7 +1258,9 @@ export class FrontendServer {
       }
       case "session.create": {
         await runtime.request({ type: "new_session" });
-        const current = normalizeCurrentSession(await runtime.request({ type: "get_state" }));
+        const current = normalizeCurrentSession(
+          await runtime.request({ type: "get_state" }),
+        );
         await this.emitInitialSnapshot(current);
         return current;
       }
@@ -1249,7 +1269,9 @@ export class FrontendServer {
         if (!sessionPath)
           throw frontendError("SESSION_NOT_FOUND", "Session not found");
         await runtime.request({ type: "switch_session", sessionPath });
-        const current = normalizeCurrentSession(await runtime.request({ type: "get_state" }));
+        const current = normalizeCurrentSession(
+          await runtime.request({ type: "get_state" }),
+        );
         await this.emitInitialSnapshot(current);
         return current;
       }
@@ -1258,7 +1280,9 @@ export class FrontendServer {
       case "session.delete":
         return this.mutateSession(method, params);
       case "session.current": {
-        const current = normalizeCurrentSession(await runtime.request({ type: "get_state" }));
+        const current = normalizeCurrentSession(
+          await runtime.request({ type: "get_state" }),
+        );
         await this.emitInitialSnapshot(current);
         return current;
       }
