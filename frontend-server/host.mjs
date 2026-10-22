@@ -872,7 +872,7 @@ export class PiSystemHost {
       protocolVersion: negotiated,
       serverVersion: PROTOCOL_PACKAGE_VERSION,
       piVersion: this.backendHello.piVersion,
-      capabilities: [...CAPABILITIES, "shared-session-owner"],
+      capabilities: [...CAPABILITIES, "shared-session-owner", "goal-readback"],
       hostEpoch: this.hostEpoch,
     });
     this.sendClientEvent(client, "state.snapshot", this.state);
@@ -1075,7 +1075,16 @@ export class PiSystemHost {
       this.runStore.recordToolStarted(record, {
         toolCallId: data?.toolCallId,
         toolName: data?.toolName,
-        args: data?.args,
+        args:
+          typeof data?.targetPath === "string" &&
+          (path.isAbsolute(data.targetPath) || this.state?.session?.cwd)
+            ? {
+                path: path.resolve(
+                  this.state?.session?.cwd ?? "/",
+                  data.targetPath,
+                ),
+              }
+            : undefined,
       });
       this.broadcastRunEvent("run.updated", record);
       return;
@@ -1087,6 +1096,26 @@ export class PiSystemHost {
         toolName: data?.toolName,
         isError: event === "tool.failed" || data?.isError === true,
       });
+      if (
+        data?.toolName === "system_file_verify" &&
+        event === "tool.completed" &&
+        data?.goalCheck &&
+        data?.isError !== true
+      ) {
+        try {
+          this.runStore.verifyFileReadback(record, {
+            ...data.goalCheck,
+            checkId: `file-readback:${data.toolCallId}`,
+          });
+        } catch {
+          this.runStore.recordVerification(record, {
+            checkId: `file-readback:${data.toolCallId}`,
+            status: "failed",
+            summary:
+              "Host could not independently read back the requested file goal",
+          });
+        }
+      }
       this.broadcastRunEvent("run.updated", record);
       return;
     }
@@ -1106,27 +1135,8 @@ export class PiSystemHost {
       return;
     }
 
-    if (event === "verification.changed" && typeof data?.status === "string") {
-      const normalized = /pass|ok|success/i.test(data.status)
-        ? "passed"
-        : /fail|error|blocked/i.test(data.status)
-          ? "failed"
-          : "pending";
-      this.runStore.recordVerification(record, {
-        checkId: "runtime-verification",
-        status: normalized,
-        summary: `Runtime verification status: ${data.status}`,
-      });
-      const outEvent = TERMINAL_RUN_STATES.has(record.state)
-        ? "run.settled"
-        : "run.updated";
-      this.broadcastRunEvent(outEvent, record);
-      if (record.state === "SUCCEEDED") {
-        this.currentRunId = undefined;
-        this.maybeStartNextQueuedRun();
-      }
-      return;
-    }
+    // Project-check status is not an independent system-goal observation.
+    if (event === "verification.changed") return;
 
     if (event === "agent.settled") {
       this.runStore.settleTurn(record, { aborted: data?.aborted === true });
@@ -1237,15 +1247,12 @@ export class PiSystemHost {
           );
           return;
         }
-        const afterRevision = params.afterRevision ?? 0;
-        const events = record.events.filter(
-          (entry) => entry.revision > afterRevision,
+        this.sendClientResult(
+          client,
+          id,
+          method,
+          this.runStore.getEvents(record, params.afterRevision ?? 0),
         );
-        this.sendClientResult(client, id, method, {
-          run: toPublicRunSnapshot(record),
-          events,
-          currentRevision: record.revision,
-        });
         return;
       }
 
@@ -1262,6 +1269,16 @@ export class PiSystemHost {
             });
             return;
           }
+        }
+
+        if (this.runStore.corruptedRuns.size > 0) {
+          this.sendClientError(
+            client,
+            id,
+            "RUN_CORRUPT",
+            "A run manifest is corrupt; unknown submissions cannot safely be replayed",
+          );
+          return;
         }
 
         const blocking = this.getCurrentOrBlockingRun();
@@ -1375,7 +1392,8 @@ export class PiSystemHost {
             result: {
               outcome: "cancelled",
               partial: record.actions.some((a) => a.effectState === "applied"),
-              message: params.reason ?? "Run cancelled while awaiting verification",
+              message:
+                params.reason ?? "Run cancelled while awaiting verification",
               cancelScope: "turn_and_tools_stopped",
               verificationRefs: [],
             },
@@ -1430,37 +1448,26 @@ export class PiSystemHost {
       }
 
       if (method === "run.verify") {
-        const record = this.runStore.getRun(params.runId);
-        if (!record) {
-          this.sendClientError(
-            client,
-            id,
-            "RUN_NOT_FOUND",
-            `Run ${params.runId} not found`,
-          );
-          return;
-        }
-        this.runStore.recordVerification(record, params);
-        const outEvent = TERMINAL_RUN_STATES.has(record.state)
-          ? "run.settled"
-          : "run.updated";
-        if (
-          TERMINAL_RUN_STATES.has(record.state) &&
-          this.currentRunId === record.runId
-        ) {
-          this.currentRunId = undefined;
-        }
-        this.broadcastRunEvent(outEvent, record);
-        if (record.state === "SUCCEEDED") {
-          this.maybeStartNextQueuedRun();
-        }
-        this.sendClientResult(client, id, method, {
-          run: toPublicRunSnapshot(record),
-        });
+        this.sendClientError(
+          client,
+          id,
+          "PERMISSION_DENIED",
+          "Frontend assertions are not goal evidence; a host-executed readback is required",
+        );
         return;
       }
 
       if (method === "run.reconcile") {
+        if (params.effectState !== "unknown") {
+          this.sendClientError(
+            client,
+            id,
+            "PERMISSION_DENIED",
+            "Effect assertions require trusted host inspection; no frontend replay authorization",
+          );
+          return;
+        }
+
         const record = this.runStore.getRun(params.runId);
         if (!record) {
           this.sendClientError(
@@ -1706,8 +1713,7 @@ export class PiSystemHost {
       if (pendingUi) pendingUi.responding = false;
     }
     const startsTurn =
-      request.method === "agent.prompt" ||
-      request.method === "agent.followUp";
+      request.method === "agent.prompt" || request.method === "agent.followUp";
     if (startsTurn) {
       this.activeRun = true;
       this.uncertainRun = true;
@@ -1727,8 +1733,8 @@ export class PiSystemHost {
     const activeRunRecord = this.getCurrentOrBlockingRun();
     const hasActiveRunRecord = Boolean(
       activeRunRecord &&
-        (ACTIVE_EXECUTION_STATES.has(activeRunRecord.state) ||
-          activeRunRecord.state === "UNCERTAIN"),
+      (ACTIVE_EXECUTION_STATES.has(activeRunRecord.state) ||
+        activeRunRecord.state === "UNCERTAIN"),
     );
     return (
       this.activeRun ||

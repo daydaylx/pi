@@ -602,6 +602,10 @@ function publicRuntimeEvent(message) {
       data: {
         toolCallId: String(message.toolCallId ?? ""),
         toolName: String(message.toolName ?? ""),
+        ...(["write", "edit"].includes(message.toolName) &&
+        typeof message.args?.path === "string"
+          ? { targetPath: message.args.path }
+          : {}),
       },
     };
   }
@@ -621,6 +625,16 @@ function publicRuntimeEvent(message) {
         toolCallId: String(message.toolCallId ?? ""),
         toolName: String(message.toolName ?? ""),
         isError: message.isError === true,
+        ...(message.toolName === "system_file_verify" &&
+        message.result?.details?.goalCheck &&
+        !message.isError
+          ? {
+              goalCheck: {
+                filePath: message.result.details.goalCheck.filePath,
+                expectedSha256: message.result.details.goalCheck.expectedSha256,
+              },
+            }
+          : {}),
       },
     };
   }

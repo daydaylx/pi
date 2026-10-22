@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import {
@@ -55,9 +56,7 @@ function connectClient(socketPath) {
         method,
         params,
       });
-      return this.next(
-        (frame) => frame.kind === "response" && frame.id === id,
-      );
+      return this.next((frame) => frame.kind === "response" && frame.id === id);
     },
     next(predicate, timeoutMs = FRAME_WAIT_MS) {
       const index = frames.findIndex(predicate);
@@ -66,7 +65,7 @@ function connectClient(socketPath) {
         const timer = setTimeout(() => {
           const idx = waiters.findIndex((w) => w.resolve === wrappedResolve);
           if (idx >= 0) waiters.splice(idx, 1);
-          reject(new Error("Timed out waiting for host frame"));
+          reject(new Error(`Timed out waiting for host frame: ${predicate}`));
         }, timeoutMs);
         const wrappedResolve = (frame) => {
           clearTimeout(timer);
@@ -124,7 +123,11 @@ test("RunStore persists atomic manifests, isolates corrupt files, and enforces c
     assert.equal(run1.actions[0].effectState, "executing");
 
     // Write a corrupt manifest file to verify isolation
-    writeFileSync(path.join(runsDir, "run_corrupted1.json"), "{ invalid json", "utf8");
+    writeFileSync(
+      path.join(runsDir, "run_corrupted1.json"),
+      "{ invalid json",
+      "utf8",
+    );
 
     // 3. New host epoch starts and reconciles disk state
     const store2 = new RunStore({ runsDir, hostEpoch: "epoch-2" });
@@ -182,9 +185,7 @@ test("RunStore persists atomic manifests, isolates corrupt files, and enforces c
     assert.deepEqual(r1Uncertain.source_of_truth, [
       "/etc/nixos/configuration.nix",
     ]);
-    assert.deepEqual(r1Uncertain.observations, [
-      "Target file hash unchanged",
-    ]);
+    assert.deepEqual(r1Uncertain.observations, ["Target file hash unchanged"]);
     assert.deepEqual(r1Uncertain.rollback, {
       available: true,
       strategy: "git-checkout",
@@ -215,7 +216,9 @@ test(
           ...process.env,
           HOME: temp,
           PI_CODING_AGENT_DIR: agentDir,
-          PI_SYSTEM_HOST_ENV_PASSTHROUGH: "FAKE_PI_PROMPT_LOG",
+          PI_SYSTEM_HOST_ENV_PASSTHROUGH:
+            "FAKE_PI_PROMPT_LOG,FAKE_PI_GOAL_FILE",
+          FAKE_PI_GOAL_FILE: path.join(temp, "isolated-result.txt"),
           FAKE_PI_PROMPT_LOG: promptLog,
         },
         runtimeDir: temp,
@@ -314,18 +317,34 @@ test(
       assert.ok(eventsRes.result.events.length >= 2);
       assert.equal(eventsRes.result.run.state, "VERIFYING");
 
-      // Record verification pass -> Run 1 transitions to SUCCEEDED and automatically starts queued Run 2!
+      // A frontend cannot assert success, even with an evidence label.
       const verifyRes = await c1.request("ver-1", "run.verify", {
         runId: runId1,
-        checkId: "unit-active-check",
+        checkId: "forged",
         status: "passed",
-        summary: "Unit verified active",
-        evidenceRef: "systemctl-check-1",
+        summary: "Trust me",
+        evidenceRef: "arbitrary-label",
       });
-      assert.equal(verifyRes.ok, true);
-      assert.equal(verifyRes.result.run.state, "SUCCEEDED");
+      assert.equal(verifyRes.ok, false);
+      assert.equal(verifyRes.error.code, "PERMISSION_DENIED");
+      const readbackFile = path.join(temp, "isolated-result.txt");
+      writeFileSync(readbackFile, "expected result");
+      const verify = (id) => {
+        const record = host.runStore.getRun(id);
+        host.runStore.verifyFileReadback(record, {
+          filePath: readbackFile,
+          expectedSha256: createHash("sha256")
+            .update("expected result")
+            .digest("hex"),
+          checkId: "isolated-file-readback",
+        });
+        host.broadcastRunEvent("run.settled", record);
+        host.currentRunId = undefined;
+        host.maybeStartNextQueuedRun();
+      };
+      verify(runId1);
 
-      // Queued Run 2 now automatically runs and settles as SUCCEEDED
+      // A non-mutating queued conversation can settle without a goal readback.
       const run2Settled = await c1.next(
         (f) => f.event === "run.settled" && f.data.run.runId === runId2,
       );
@@ -420,9 +439,13 @@ test(
       );
 
       // Direct run.resume without reconcile MUST be rejected with RUN_CONFLICT
-      const prematureResume = await cAfter.request("res-blocked", "run.resume", {
-        runId: hangRunId,
-      });
+      const prematureResume = await cAfter.request(
+        "res-blocked",
+        "run.resume",
+        {
+          runId: hangRunId,
+        },
+      );
       assert.equal(prematureResume.ok, false);
       assert.equal(prematureResume.error.code, "RUN_CONFLICT");
 
@@ -432,14 +455,27 @@ test(
         effectState: "not_applied",
         notes: "Checked target state: command did not take effect before crash",
       });
-      assert.equal(recRes.ok, true);
-      assert.equal(recRes.result.run.state, "RESUMABLE");
+      assert.equal(recRes.ok, false);
+      assert.equal(recRes.error.code, "PERMISSION_DENIED");
+      host.runStore.reconcileRun(host.runStore.getRun(hangRunId), {
+        effectState: "not_applied",
+        notes: "Trusted test operator inspection",
+      });
 
+      host.uncertainRun = false;
+      host.activeRun = false;
       const resumeRes = await cAfter.request("res-ok", "run.resume", {
         runId: hangRunId,
         message: "Safe resumed execution [TOOL_OK]",
       });
       assert.equal(resumeRes.ok, true);
+      await cAfter.next(
+        (f) =>
+          f.event === "run.updated" &&
+          f.data.run.runId === hangRunId &&
+          f.data.run.state === "VERIFYING",
+      );
+      verify(hangRunId);
       const resumedSettled = await cAfter.next(
         (f) => f.event === "run.settled" && f.data.run.runId === hangRunId,
       );
@@ -467,7 +503,11 @@ test(
       }
       const burstResults = await Promise.all(burstPromises);
       const uniqueRunIds = new Set(burstResults.map((r) => r.result.run.runId));
-      assert.equal(uniqueRunIds.size, 1, "exactly one run created across 105 submissions");
+      assert.equal(
+        uniqueRunIds.size,
+        1,
+        "exactly one run created across 105 submissions",
+      );
       assert.equal(
         burstResults.filter((r) => r.result.deduplicated === false).length,
         1,
@@ -492,6 +532,13 @@ test(
       assert.equal(qCancelRes.result.cancelScope, "queued_removed");
       assert.equal(qCancelRes.result.run.state, "CANCELLED");
 
+      await cAfter.next(
+        (f) =>
+          f.event === "run.updated" &&
+          f.data.run.runId === burstRunId &&
+          f.data.run.state === "VERIFYING",
+      );
+      verify(burstRunId);
       await cAfter.next(
         (f) => f.event === "run.settled" && f.data.run.runId === burstRunId,
       );
@@ -525,8 +572,7 @@ test(
       assert.equal(hcCancelRes.result.run.state, "CANCELLING");
       const hcReconcileReq = await cAfter.next(
         (f) =>
-          f.event === "run.reconcile_required" &&
-          f.data.run.runId === hcRunId,
+          f.event === "run.reconcile_required" && f.data.run.runId === hcRunId,
       );
       assert.equal(hcReconcileReq.data.run.state, "UNCERTAIN");
       assert.equal(
@@ -541,8 +587,9 @@ test(
         notes: "External tool completed before abort took effect",
         evidenceRef: "state-check-ok",
       });
-      assert.equal(hcRec.ok, true);
-      assert.equal(hcRec.result.run.state, "SUCCEEDED");
+      assert.equal(hcRec.ok, false);
+      assert.equal(hcRec.error.code, "PERMISSION_DENIED");
+      assert.equal(host.runStore.getRun(hcRunId).state, "UNCERTAIN");
     } finally {
       for (const c of clients) c.socket.destroy();
       await host.stop();

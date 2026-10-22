@@ -10,7 +10,11 @@ const NonEmptyString = Type.String({ minLength: 1 });
 const Empty = Type.Object({}, Strict);
 const MessageData = Type.Object({ message: PublicMessageSchema }, Strict);
 const ToolData = Type.Object(
-  { toolCallId: NonEmptyString, toolName: NonEmptyString },
+  {
+    toolCallId: NonEmptyString,
+    toolName: NonEmptyString,
+    targetPath: Type.Optional(NonEmptyString),
+  },
   Strict,
 );
 const ToolEndData = Type.Object(
@@ -18,6 +22,15 @@ const ToolEndData = Type.Object(
     toolCallId: NonEmptyString,
     toolName: NonEmptyString,
     isError: Type.Boolean(),
+    goalCheck: Type.Optional(
+      Type.Object(
+        {
+          filePath: NonEmptyString,
+          expectedSha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+        },
+        Strict,
+      ),
+    ),
   },
   Strict,
 );
