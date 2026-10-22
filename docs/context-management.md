@@ -69,6 +69,9 @@ Die Regressionstests verwenden keine Provider-Aufrufe:
 
 Die folgenden Probleme gehören zu `@earendil-works/pi-coding-agent`, nicht zu einer lokalen Extension:
 
+> Die Tabelle darunter ist eine historische Gap-Analyse vom 12.08.2026 gegen Runtime
+> `0.84.1`; sie beschreibt nicht ungeprüft den heutigen Stand.
+
 | Codepfad (0.84.1)                                                                                                         | Benötigte Änderung                                                                                                                                                                                                                                                 | Benötigte Tests                                                                                                                                           | Lokale Auswirkung/Risiko                                                                  |
 | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `src/core/agent-session.ts`, `_checkCompaction()` und `prompt()`                                                          | Vor dem nächsten Provider-Request ein projiziertes Budget aus Branch, neuem User-Input, pending Messages, turn-lokalem Systemprompt und aktiven Tools verwenden. Bei fehlender Usage konservativ schätzen; keine Usage vor der letzten Compaction wiederverwenden. | gültige/fehlende/Null-Usage, neue User-/Extension-Nachricht, Modellwechsel auf kleineres/größeres Fenster, Compaction zwischen zwei Usages.               | Ohne Patch kann der Pre-Prompt-Check die neue Anfrage unterschätzen.                      |
@@ -76,7 +79,18 @@ Die folgenden Probleme gehören zu `@earendil-works/pi-coding-agent`, nicht zu e
 | `src/core/compaction/compaction.ts`, `CompactionSettings`, `generateSummaryWithUsage()` und `generateTurnPrefixSummary()` | Trigger-Headroom, Keep-Recent, normales Summary-Ziel und Split-Turn-Summary-Ziel trennen. Trigger und Keep-Recent sind inzwischen ohne Patch gemessen und gesetzt (81,9 % / 20k, siehe `docs/decisions/010`); offen bleibt allein die Kopplung von Trigger-Headroom und Summary-Budget an denselben `reserveTokens`.                                                  | 50/70/80/90 %, zwei Compactions, Summary+Recent klar unter Trigger, kein unkontrolliertes Summary-Wachstum.                                               | Der heutige `reserveTokens` steuert zugleich Trigger und Summary-Maximum.                 |
 | `src/core/agent-session.ts`, `_runAutoCompaction()`/Overflow-Pfad                                                         | Strukturierte Outcomes/Events für disabled, not-needed, estimate, preparation/migration/no-range, auth/provider/abort failure, success und exhausted overflow retry bereitstellen.                                                                                 | jeder Outcome sichtbar, ein fehlgeschlagener Retry, keine Wiederholung erfolgreicher Assistant-Ausgabe.                                                   | Die lokale Resilience-Erweiterung kann nur bereits vorhandene Boundary-Events darstellen. |
 
-Die Source-Maps des gepinnten Pakets verweisen auf diese `src/`-Pfade. Es wird kein `node_modules`-Patch gebaut und kein Upgrade vorgenommen. Ein künftiger Pin-Wechsel ist erst vertretbar, wenn der veröffentlichte Core-Patch exakt gepinnt ist und die genannten Runtime-Tests grün sind.
+Die Source-Maps des damaligen Pakets verwiesen auf diese `src/`-Pfade. Zu diesem Analysezeitpunkt wurde kein `node_modules`-Patch gebaut und kein Upgrade vorgenommen. Ein Pin-Wechsel war erst vertretbar, wenn ein veröffentlichter Core-Patch exakt gepinnt ist und die genannten Runtime-Tests grün sind.
+
+Eine statische Nachprüfung der installierten Runtime `1.3.0` zeigt: `_prepareRun()`
+prüft vor `before_agent_start` und vor dem Zusammenbau der nächsten Anfrage; der
+neue Prompt, ausstehende Nachrichten und die aktive Tool-Ladung fließen daher
+nicht in diese Vorabprüfung ein. `_handlePostAgentRun()` prüft zwar nach jedem
+Assistant-Zyklus auch nach Tool-Aufrufen erneut. Bei vorhandener Provider-Usage
+und ohne `context_edit` verwendet `_checkCompaction()` dafür aber die Usage der
+Assistant-Antwort statt einer Projektion mit den anschließend angehängten
+Tool-Ergebnissen. Große Tool-Ergebnisse können so weiterhin unterzählt werden.
+Der Runtime-Core-Punkt bleibt offen; die Prüfung hier war eine Quellcodeprüfung,
+kein Laufzeit- oder Provider-Test.
 
 ## Flüchtige Context Capsule
 
