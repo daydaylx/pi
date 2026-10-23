@@ -649,8 +649,8 @@ test("Jede Aktion nutzt feste argv und eine minimale Kindumgebung", async () => 
         ["hyprctl", ["-j", "workspaces"]],
         ["hyprctl", ["-j", "monitors"]],
         ["wpctl", ["status"]],
-        ["hyprctl", ["dispatch", "workspace", "4"]],
-        ["hyprctl", ["dispatch", "focuswindow", "address:0xabc"]],
+        ["hyprctl", ["dispatch", 'hl.dsp.focus({workspace="4"})']],
+        ["hyprctl", ["dispatch", 'hl.dsp.focus({window="address:0xabc"})']],
         ["wpctl", ["set-volume", "@DEFAULT_AUDIO_SOURCE@", "0.75"]],
         ["notify-send", ["--", "hi", "there"]],
         ["systemctl", ["--user", "restart", "--", "waybar.service"]],
@@ -828,6 +828,33 @@ test("Policy-Matrix erzwingt Systemklassen und Bash-Gegenprobe", async () => {
   } finally {
     if (previousProfile === undefined) delete process.env.PI_LAUNCH_PROFILE;
     else process.env.PI_LAUNCH_PROFILE = previousProfile;
+  }
+});
+
+test("failed command output remains useful and redacted", async () => {
+  const previousAudit = process.env.PI_SYSTEM_AUDIT_DIR;
+  const temp = mkdtempSync(path.join(tmpdir(), "pi-command-error-"));
+  process.env.PI_SYSTEM_AUDIT_DIR = temp;
+  try {
+    const tools = register("system", async () => {
+      throw Object.assign(new Error("Command failed"), {
+        code: 7,
+        stdout: "Lua syntax error near workspace\npassword=private-value",
+        stderr: "Expected a dispatcher object",
+      });
+    });
+    const result = await tools
+      .get("system_unit_status")
+      .execute("id", { unit: "waybar.service" }, undefined, () => {}, {});
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /Lua syntax error/);
+    assert.match(result.content[0].text, /dispatcher object/);
+    assert.match(result.content[0].text, /REDACTED/);
+    assert.doesNotMatch(result.content[0].text, /private-value/);
+  } finally {
+    if (previousAudit === undefined) delete process.env.PI_SYSTEM_AUDIT_DIR;
+    else process.env.PI_SYSTEM_AUDIT_DIR = previousAudit;
+    rmSync(temp, { recursive: true, force: true });
   }
 });
 

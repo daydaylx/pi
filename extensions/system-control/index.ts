@@ -301,12 +301,26 @@ function makeTool(
             : code === "75"
               ? 75
               : null;
+        const processOutput =
+          typeof error === "object" && error !== null
+            ? ["stdout", "stderr"]
+                .map((key) =>
+                  key in error
+                    ? String((error as Record<string, unknown>)[key] ?? "")
+                    : "",
+                )
+                .filter(Boolean)
+                .join("\n")
+            : "";
         const message = redact(
           code === "75"
             ? "busy: nixos-agent meldet bereits laufenden Auftrag."
-            : error instanceof Error
-              ? error.message
-              : String(error),
+            : [
+                error instanceof Error ? error.message : String(error),
+                processOutput,
+              ]
+                .filter(Boolean)
+                .join("\n"),
         );
         const auditError = await audit({
           ts: new Date().toISOString(),
@@ -452,7 +466,7 @@ export function registerSystemControl(
         if (missing) throw new Error(missing);
         return {
           file: "hyprctl",
-          args: ["dispatch", "workspace", String(p.n)],
+          args: ["dispatch", `hl.dsp.focus({workspace="${String(p.n)}"})`],
         };
       },
     },
@@ -466,7 +480,10 @@ export function registerSystemControl(
         if (missing) throw new Error(missing);
         return {
           file: "hyprctl",
-          args: ["dispatch", "focuswindow", `address:${String(p.address)}`],
+          args: [
+            "dispatch",
+            `hl.dsp.focus({window="address:${String(p.address)}"})`,
+          ],
         };
       },
     },
