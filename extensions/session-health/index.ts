@@ -16,9 +16,10 @@ import type {
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { catalogDescription } from "../shared/command-catalog.ts";
 import {
-  aggregateSessionFile,
+  aggregateSessionEntries,
   emptySessionHealthReport,
   formatSessionHealth,
+  readSessionFile,
   summarizeUsage,
   type SessionHealthReport,
 } from "./analyze.ts";
@@ -60,14 +61,32 @@ export function collectSessionFiles(
   sessionsRoot: string,
   sinceMs?: number,
 ): string[] {
-  if (!existsSync(sessionsRoot)) return [];
+  let entries;
+  try {
+    entries = readdirSync(sessionsRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
   const files: string[] = [];
-  for (const project of readdirSync(sessionsRoot)) {
-    const projectPath = join(sessionsRoot, project);
-    if (!statSync(projectPath).isDirectory()) continue;
-    for (const name of readdirSync(projectPath)) {
-      if (!name.endsWith(".jsonl")) continue;
-      const filePath = join(projectPath, name);
+  for (const entry of entries) {
+    const paths = entry.isDirectory()
+      ? (() => {
+          try {
+            return readdirSync(join(sessionsRoot, entry.name), {
+              withFileTypes: true,
+            })
+              .filter(
+                (child) => child.isFile() && child.name.endsWith(".jsonl"),
+              )
+              .map((child) => join(sessionsRoot, entry.name, child.name));
+          } catch {
+            return [];
+          }
+        })()
+      : entry.isFile() && entry.name.endsWith(".jsonl")
+        ? [join(sessionsRoot, entry.name)]
+        : [];
+    for (const filePath of paths) {
       if (sinceMs !== undefined) {
         let mtimeMs: number;
         try {
@@ -81,6 +100,74 @@ export function collectSessionFiles(
     }
   }
   return files.sort();
+}
+
+interface SessionRoot {
+  role: "pi-project" | "pis-cli" | "pis-host";
+  path: string;
+}
+
+interface SessionRootReport {
+  role: SessionRoot["role"];
+  path: string;
+  status: "available" | "missing" | "unreadable";
+  files: number;
+  deduplicatedSessions: number;
+  report: SessionHealthReport;
+}
+
+export function collectSessionRoots(
+  roots: readonly SessionRoot[],
+  sinceMs?: number,
+): { sources: SessionRootReport[]; report: SessionHealthReport } {
+  const report = emptySessionHealthReport();
+  const seenSessions = new Set<string>();
+  const sources: SessionRootReport[] = [];
+  for (const root of roots) {
+    let status: SessionRootReport["status"] = "available";
+    let files: string[];
+    try {
+      readdirSync(root.path);
+      files = collectSessionFiles(root.path, sinceMs);
+    } catch (error) {
+      status =
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? "missing"
+          : "unreadable";
+      files = [];
+    }
+    const sourceReport = emptySessionHealthReport();
+    const source: SessionRootReport = {
+      role: root.role,
+      path: root.path,
+      status,
+      files: files.length,
+      deduplicatedSessions: 0,
+      report: sourceReport,
+    };
+    sources.push(source);
+    for (const file of files) {
+      const session = readSessionFile(file);
+      if (!session) {
+        report.parseErrors += 1;
+        sourceReport.parseErrors += 1;
+        continue;
+      }
+      report.parseErrors += session.parseErrors;
+      sourceReport.parseErrors += session.parseErrors;
+      const sessionId = session.sessionId;
+      if (sessionId && seenSessions.has(sessionId)) {
+        source.deduplicatedSessions += 1;
+        continue;
+      }
+      if (sessionId) seenSessions.add(sessionId);
+      report.files += 1;
+      sourceReport.files += 1;
+      aggregateSessionEntries(session.entries, report, sinceMs);
+      aggregateSessionEntries(session.entries, sourceReport, sinceMs);
+    }
+  }
+  return { sources, report };
 }
 
 interface RawHistoryAgent {
@@ -195,11 +282,24 @@ export default function sessionHealthExtension(pi: ExtensionAPI): void {
         parsed.days !== undefined
           ? Date.now() - parsed.days * DAY_MS
           : undefined;
-      const files = collectSessionFiles(join(agentDir, "sessions"), sinceMs);
-      const report: SessionHealthReport = emptySessionHealthReport();
-      for (const file of files) {
-        aggregateSessionFile(file, report, sinceMs);
-      }
+      const roots: SessionRoot[] = [
+        { role: "pi-project", path: join(agentDir, "sessions") },
+        {
+          role: "pis-cli",
+          path: join(agentDir, "profile-state", "system", "sessions"),
+        },
+        {
+          role: "pis-host",
+          path: join(agentDir, "profile-state", "system", "host-sessions"),
+        },
+      ];
+      const { sources, report } = collectSessionRoots(roots, sinceMs);
+      const rootSummary = sources
+        .map(
+          (source) =>
+            `${source.role}: ${source.status}, ${source.report.files} Sessions${source.deduplicatedSessions ? `, ${source.deduplicatedSessions} Duplikate übersprungen` : ""}`,
+        )
+        .join(" · ");
       const rawHistory = summarizeRawHistory(
         join(agentDir, "run-history.jsonl"),
         sinceMs,
@@ -209,7 +309,7 @@ export default function sessionHealthExtension(pi: ExtensionAPI): void {
           JSON.stringify(
             {
               windowDays: parsed.days ?? null,
-              sessionsRoot: join(agentDir, "sessions"),
+              sources,
               report: { ...report, usage: summarizeUsage(report.usage) },
               runHistoryRaw: rawHistory ?? null,
             },
@@ -228,7 +328,7 @@ export default function sessionHealthExtension(pi: ExtensionAPI): void {
         ? `\n  run-history.jsonl (roh, unverändert): ${rawHistory.lines} Zeilen${rawHistory.lastTs !== undefined ? `, letzter Eintrag ${new Date(rawHistory.lastTs * 1000).toISOString()}` : ""}${formatRawAgents(rawHistory.byAgent)}`
         : "";
       ctx.ui.notify(
-        `${formatSessionHealth(report).replace("Session-Health", `Session-Health${header}`)}${historyLine}`,
+        `${formatSessionHealth(report).replace("Session-Health", `Session-Health${header}`)}\n  Quellen: ${rootSummary}${historyLine}`,
         "info",
       );
     },

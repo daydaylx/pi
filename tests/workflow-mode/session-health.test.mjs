@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, eq, test } from "../shared/assertions.mjs";
@@ -373,6 +379,132 @@ await test("session health arguments and file collection are bounded", () => {
   }
 });
 
+await test("session health combines the three roots and counts duplicate session IDs once", () => {
+  if (!sessionHealth) return;
+  const dir = mkdtempSync(join(tmpdir(), "pi-session-health-roots-"));
+  const roots = [
+    { role: "pi-project", path: join(dir, "sessions") },
+    { role: "pis-cli", path: join(dir, "profile-state/system/sessions") },
+    { role: "pis-host", path: join(dir, "profile-state/system/host-sessions") },
+    { role: "missing", path: join(dir, "not-created") },
+  ];
+  const session = (id, input) => [
+    { type: "session", version: 3, id },
+    {
+      type: "message",
+      timestamp: "2026-10-24T10:00:00.000Z",
+      message: { role: "user", content: "fixture" },
+    },
+    {
+      type: "message",
+      timestamp: "2026-10-24T10:00:01.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", name: "fixture-action" }],
+        usage: { input, output: 2, cacheRead: 0, cost: { total: 0.01 } },
+      },
+    },
+  ];
+  const writeJsonl = (path, entries) => {
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, `${toJsonl(entries)}\n`);
+  };
+  try {
+    writeJsonl(
+      join(roots[0].path, "project-a", "project.jsonl"),
+      session("shared-session", 10),
+    );
+    // Flat JSONL is used by the system CLI as well as the nested project layout.
+    writeJsonl(join(roots[1].path, "cli.jsonl"), session("shared-session", 10));
+    writeJsonl(
+      join(roots[1].path, "other-cli.jsonl"),
+      session("cli-session", 20),
+    );
+    writeJsonl(
+      join(roots[2].path, "nested", "host.jsonl"),
+      session("host-session", 30),
+    );
+    const originalFiles = [
+      join(roots[0].path, "project-a", "project.jsonl"),
+      join(roots[1].path, "cli.jsonl"),
+      join(roots[1].path, "other-cli.jsonl"),
+      join(roots[2].path, "nested", "host.jsonl"),
+    ].map((path) => readFileSync(path, "utf8"));
+
+    const collected = sessionHealth.collectSessionRoots(roots.slice(0, 3));
+    eq(
+      collected.report.files,
+      3,
+      "each unique stable session id is counted once",
+    );
+    eq(
+      collected.report.usage.requests,
+      3,
+      "project, CLI, and host requests are combined",
+    );
+    eq(
+      collected.report.usage.inputTokens,
+      60,
+      "a duplicate session does not double-count tokens",
+    );
+    eq(
+      collected.report.usage.costUsd,
+      0.03,
+      "a duplicate session does not double-count cost",
+    );
+    eq(
+      collected.report.usage.toolCalls,
+      3,
+      "a duplicate session does not double-count actions",
+    );
+    eq(
+      collected.sources[0].report.files,
+      1,
+      "project sessions remain separately attributed",
+    );
+    eq(
+      collected.sources[1].report.files,
+      1,
+      "the duplicate CLI session is skipped",
+    );
+    eq(
+      collected.sources[1].deduplicatedSessions,
+      1,
+      "the skipped duplicate is explicit",
+    );
+    eq(
+      collected.sources[2].report.files,
+      1,
+      "host sessions remain separately attributed",
+    );
+    eq(
+      sessionHealth.collectSessionRoots([roots[3]]).sources[0].status,
+      "missing",
+      "a missing root is explicitly reported",
+    );
+    const fileRoot = join(dir, "not-a-directory.jsonl");
+    writeFileSync(fileRoot, "");
+    eq(
+      sessionHealth.collectSessionRoots([{ role: "pis-host", path: fileRoot }])
+        .sources[0].status,
+      "unreadable",
+      "a non-directory root is explicitly reported as unreadable",
+    );
+    eq(
+      [
+        join(roots[0].path, "project-a", "project.jsonl"),
+        join(roots[1].path, "cli.jsonl"),
+        join(roots[1].path, "other-cli.jsonl"),
+        join(roots[2].path, "nested", "host.jsonl"),
+      ].map((path) => readFileSync(path, "utf8")),
+      originalFiles,
+      "analysis does not migrate or modify session files",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 await test("the session-health command reports without mutating anything", async () => {
   if (!sessionHealth) return;
   // Eigenes Agent-Verzeichnis mit zwei Subagenten in der Rohhistorie: Das Ergebnis
@@ -417,6 +549,19 @@ async function runSessionHealthCommand() {
   eq(jsonNotice.level, "info", "a valid report is a normal notification");
   const parsed = JSON.parse(jsonNotice.message);
   eq(parsed.windowDays, 1, "the window is applied");
+  eq(parsed.sources.length, 3, "all three roots appear in structured output");
+  eq(
+    parsed.sources[0].role,
+    "pi-project",
+    "project source identity is explicit",
+  );
+  eq(parsed.sources[1].role, "pis-cli", "CLI source identity is explicit");
+  eq(parsed.sources[2].role, "pis-host", "host source identity is explicit");
+  eq(
+    parsed.sources[2].status,
+    "missing",
+    "an unavailable root is visible in JSON",
+  );
   assert(
     parsed.report && typeof parsed.report.turns === "object",
     "the JSON payload carries the structured report",

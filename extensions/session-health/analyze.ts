@@ -387,23 +387,47 @@ export function aggregateSessionEntries(
   report.turns.open += openTurns.size;
 }
 
+/** Liest eine Session-Datei einmal und bestimmt ihre stabile Session-ID. */
+export function readSessionFile(
+  path: string,
+): { entries: unknown[]; parseErrors: number; sessionId?: string } | undefined {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+  const { entries, parseErrors } = parseSessionLines(text);
+  const header = entries.find(
+    (entry) =>
+      isRecord(entry) &&
+      entry.type === "session" &&
+      typeof entry.id === "string" &&
+      entry.id.length > 0,
+  );
+  return {
+    entries,
+    parseErrors,
+    ...(isRecord(header) && typeof header.id === "string"
+      ? { sessionId: header.id }
+      : {}),
+  };
+}
+
 /** Liest eine Session-Datei und faltet sie in den Bericht. */
 export function aggregateSessionFile(
   path: string,
   report: SessionHealthReport,
   sinceMs?: number,
 ): void {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
+  const session = readSessionFile(path);
+  if (!session) {
     report.parseErrors += 1;
     return;
   }
-  const { entries, parseErrors } = parseSessionLines(text);
-  report.parseErrors += parseErrors;
+  report.parseErrors += session.parseErrors;
   report.files += 1;
-  aggregateSessionEntries(entries, report, sinceMs);
+  aggregateSessionEntries(session.entries, report, sinceMs);
 }
 
 const RECORD_ORDER = new Intl.Collator("de");
