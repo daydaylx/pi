@@ -609,7 +609,10 @@ function publicRuntimeEvent(message) {
         ["status", "output", "stop"].includes(message.args?.action)
           ? { jobAction: message.args.action }
           : {}),
-        ...(["write", "edit"].includes(message.toolName) &&
+        ...((["write", "edit"].includes(message.toolName) ||
+          (message.toolName === "read" &&
+            message.args?.offset === undefined &&
+            message.args?.limit === undefined)) &&
         typeof message.args?.path === "string"
           ? { targetPath: message.args.path }
           : {}),

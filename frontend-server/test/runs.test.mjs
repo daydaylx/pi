@@ -15,6 +15,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { PiSystemHost } from "../host.mjs";
+import { mapRuntimeEvent } from "../index.mjs";
 import { RunStore } from "../runs.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -597,3 +598,166 @@ test(
     }
   },
 );
+
+test("failed attempts resolve only with identical reads or host-proved file repairs", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-run-repair-"));
+  try {
+    const store = new RunStore({ runsDir: temp, hostEpoch: "test" });
+    const create = () => store.createRun({ sessionId: "s", message: "repair" });
+    let seq = 0;
+    const call = (run, toolName, filePath, isError, extra = {}) => {
+      const toolCallId = `repair-${++seq}`;
+      store.recordToolStarted(run, {
+        toolCallId,
+        toolName,
+        args: { path: filePath, ...extra },
+      });
+      store.recordToolFinished(run, { toolCallId, toolName, isError });
+      return run.actions.at(-1);
+    };
+    const x = path.join(temp, "x");
+    const y = path.join(temp, "y");
+    const repaired = create();
+    const failed = call(repaired, "read", x, true);
+    const success = call(repaired, "read", x, false);
+    store.settleTurn(repaired);
+    assert.equal(repaired.state, "SUCCEEDED");
+    assert.equal(failed.effectState, "failed");
+    assert.equal(failed.resolution.actionId, success.actionId);
+    assert.deepEqual(repaired.remaining_issues, []);
+    const manifest = JSON.parse(
+      readFileSync(path.join(temp, `${repaired.runId}.json`), "utf8"),
+    );
+    assert.deepEqual(manifest.actions, repaired.actions);
+    const reopened = new RunStore({ runsDir: temp, hostEpoch: "next" });
+    reopened.loadAndReconcileStartup("next");
+    assert.deepEqual(reopened.getRun(repaired.runId).actions, repaired.actions);
+
+    for (const [label, tool, target, extra] of [
+      ["different resource", "read", y, {}],
+      ["different range", "read", x, { offset: 2 }],
+      ["different tool", "ls", x, {}],
+      ["relative resource", "read", "x", {}],
+    ]) {
+      const r = create();
+      const f = call(r, "read", label === "relative resource" ? "x" : x, true);
+      call(r, tool, target, false, extra);
+      store.settleTurn(r);
+      assert.equal(r.state, "FAILED", label);
+      assert.equal(f.resolution, undefined, label);
+      assert.ok(r.remaining_issues.length, label);
+    }
+    // A later failure of the same resource remains open after an earlier repair.
+    const regressed = create();
+    call(regressed, "read", x, true);
+    call(regressed, "read", x, false);
+    call(regressed, "read", x, true);
+    store.settleTurn(regressed);
+    assert.equal(regressed.state, "FAILED");
+    assert.equal(regressed.remaining_issues.length, 1);
+
+    const sha = createHash("sha256").update("expected").digest("hex");
+    for (const [label, repairTarget, contents, expectedState] of [
+      ["verified repair", x, "expected", "SUCCEEDED"],
+      ["other target", y, "expected", "FAILED"],
+      ["failed readback", x, "wrong", "FAILED"],
+    ]) {
+      const r = create();
+      const f = call(r, "write", x, true);
+      call(r, "edit", repairTarget, false);
+      assert.equal(
+        f.resolution,
+        undefined,
+        "exit code alone cannot heal mutation",
+      );
+      writeFileSync(repairTarget, contents);
+      store.verifyFileReadback(r, {
+        filePath: repairTarget,
+        expectedSha256: sha,
+        checkId: label,
+      });
+      store.settleTurn(r);
+      assert.equal(r.state, expectedState, label);
+      assert.equal(f.effectState, "failed", label);
+      if (expectedState === "SUCCEEDED")
+        assert.equal(f.resolution.checkId, label);
+      else assert.equal(f.resolution, undefined, label);
+    }
+    const historical = create();
+    for (const mismatched of [
+      { toolCallId: "foreign", toolName: "write" },
+      { toolCallId: "open", toolName: "read" },
+    ]) {
+      const r = create();
+      const f = call(r, "write", x, true);
+      store.recordToolStarted(r, {
+        toolCallId: "open",
+        toolName: "write",
+        args: { path: x },
+      });
+      store.recordToolFinished(r, { ...mismatched, isError: false });
+      writeFileSync(x, "expected");
+      store.verifyFileReadback(r, {
+        filePath: x,
+        expectedSha256: sha,
+        checkId: "foreign-completion",
+      });
+      store.settleTurn(r);
+      assert.equal(r.state, "FAILED");
+      assert.equal(f.resolution, undefined);
+    }
+    call(historical, "read", x, true);
+    delete historical.actions[0].readIdentity;
+    store.settleTurn(historical);
+    const oldId = historical.runId;
+    const oldStore = new RunStore({ runsDir: temp, hostEpoch: "old" });
+    oldStore.loadAndReconcileStartup("old");
+    assert.equal(oldStore.getRun(oldId).state, "FAILED");
+    assert.equal(oldStore.getRun(oldId).actions[0].resolution, undefined);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("runtime adapter and host preserve default-read repair identity without guessing ranges", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-host-repair-"));
+  try {
+    mkdirSync(path.join(temp, "agent"), { mode: 0o700 });
+    const host = new PiSystemHost({
+      runtimeDir: temp,
+      env: { HOME: temp, PI_CODING_AGENT_DIR: path.join(temp, "agent") },
+    });
+    host.state = { session: { id: "s", cwd: temp } };
+    host.runStore = new RunStore({
+      runsDir: path.join(temp, "runs"),
+      hostEpoch: "test",
+    });
+    for (const ranged of [false, true]) {
+      const r = host.runStore.createRun({
+        sessionId: "s",
+        message: "read repair",
+      });
+      host.currentRunId = r.runId;
+      for (const isError of [true, false]) {
+        const toolCallId = `read-${isError}`;
+        for (const message of [
+          {
+            type: "tool_execution_start",
+            toolCallId,
+            toolName: "read",
+            args: { path: "x", ...(ranged ? { offset: 10 } : {}) },
+          },
+          { type: "tool_execution_end", toolCallId, toolName: "read", isError },
+        ]) {
+          const frame = mapRuntimeEvent(message, 1);
+          host.handleRunLifecycleEvent(frame.event, frame.data);
+        }
+      }
+      host.runStore.settleTurn(r);
+      assert.equal(r.state, ranged ? "FAILED" : "SUCCEEDED");
+      assert.equal(r.actions[0].effectState, "failed");
+    }
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});

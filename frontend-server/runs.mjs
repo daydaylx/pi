@@ -89,6 +89,57 @@ const MAX_RUN_EVENTS = 200;
 const READBACK_PROOF = Symbol("host-readback");
 const HOST_PROOF_KINDS = new Set(["host-file-sha256", "host-system-state"]);
 
+// Only an identical bounded read or a later host-proved file repair can
+// resolve a failed attempt. Shell commands and unknown resources stay open.
+function readIdentity(toolName, args) {
+  if (
+    toolName !== "read" ||
+    typeof args?.path !== "string" ||
+    !path.isAbsolute(args.path) ||
+    [args.offset, args.limit].some(
+      (value) => value !== undefined && (!Number.isInteger(value) || value < 1),
+    )
+  )
+    return undefined;
+  return JSON.stringify([args.path, args.offset ?? 1, args.limit ?? null]);
+}
+
+function hasOpenFailure(action) {
+  return action.effectState === "failed" && !action.resolution;
+}
+
+function resolveFailedAttempts(record, repair, checkId) {
+  const repairIndex = record.actions.indexOf(repair);
+  for (const failed of record.actions.slice(0, repairIndex)) {
+    if (!hasOpenFailure(failed)) continue;
+    const sameRead =
+      !failed.mutating &&
+      !repair.mutating &&
+      failed.readIdentity &&
+      failed.readIdentity === repair.readIdentity;
+    const provedFileRepair =
+      checkId &&
+      repair.completionMatched === true &&
+      failed.mutating &&
+      repair.mutating &&
+      failed.targetPath &&
+      failed.targetPath === repair.targetPath;
+    if (!sameRead && !provedFileRepair) continue;
+    failed.resolution = {
+      actionId: repair.actionId,
+      resolvedAt: new Date().toISOString(),
+      ...(checkId ? { checkId } : {}),
+    };
+    // Remove only the issue belonging to this attempt; keep unrelated and
+    // legacy issue text, and retain the original failed action unchanged.
+    if (failed.issue) {
+      record.remaining_issues = record.remaining_issues.filter(
+        (issue) => issue !== failed.issue,
+      );
+    }
+  }
+}
+
 function sanitizeTitle(raw, fallback = "Systemauftrag") {
   if (typeof raw !== "string") return fallback;
   const firstLine = raw
@@ -607,6 +658,9 @@ export class RunStore {
       toolName: String(toolName || "unknown"),
       mutating,
       externalJob: externalJob === true,
+      ...(readIdentity(toolName, args)
+        ? { readIdentity: readIdentity(toolName, args) }
+        : {}),
       ...(typeof args?.path === "string" &&
       path.isAbsolute(args.path) &&
       ["write", "edit"].includes(toolName)
@@ -683,6 +737,10 @@ export class RunStore {
 
     const resolvedName = String(toolName || action?.toolName || "unknown");
     if (action) {
+      action.completionMatched =
+        isError === false &&
+        action.toolCallId === toolCallId &&
+        action.toolName === resolvedName;
       if (
         action.toolName === "nixos_apply" &&
         typeof externalJobId === "string" &&
@@ -700,6 +758,7 @@ export class RunStore {
             ? "applied"
             : "not_applied";
       if (!isError && !action.mutating) {
+        if (action.completionMatched) resolveFailedAttempts(record, action);
         addUniqueBounded(
           record.observations,
           `${resolvedName} completed (${action.toolCallId})`,
@@ -707,10 +766,11 @@ export class RunStore {
       }
     }
     if (isError) {
-      addUniqueBounded(
-        record.remaining_issues,
-        `Tool execution failed: ${resolvedName}`,
-      );
+      const issue = action
+        ? `Tool execution failed: ${resolvedName} (${action.actionId})`
+        : `Tool execution failed: ${resolvedName}`;
+      if (action) action.issue = issue;
+      addUniqueBounded(record.remaining_issues, issue);
     }
     record.updatedAt = now;
     record.revision += 1;
@@ -797,6 +857,15 @@ export class RunStore {
     } else {
       record.verification.push(entry);
     }
+    if (status === "passed" && proof === READBACK_PROOF) {
+      for (const action of record.actions) {
+        if (
+          action.effectState === "applied" &&
+          entry.coveredActionIds?.includes(action.actionId)
+        )
+          resolveFailedAttempts(record, action, checkId);
+      }
+    }
     record.updatedAt = now;
     record.revision += 1;
     record.lastStep = `verification.${status}:${checkId}`;
@@ -806,12 +875,12 @@ export class RunStore {
       status === "passed" &&
       !record.actions.some(
         (a) =>
-          !a.finishedAt ||
-          a.effectState === "failed" ||
-          a.effectState === "unknown",
+          !a.finishedAt || hasOpenFailure(a) || a.effectState === "unknown",
       ) &&
       record.actions
-        .filter((a) => a.mutating && a.effectState !== "not_applied")
+        .filter(
+          (a) => a.mutating && a.effectState !== "not_applied" && !a.resolution,
+        )
         .every((a) =>
           record.verification.some(
             (v) =>
@@ -1006,9 +1075,7 @@ export class RunStore {
     const hasInflightMutatingAction = record.actions.some(
       (a) => a.mutating && !a.finishedAt,
     );
-    const hasFailedAction = record.actions.some(
-      (a) => a.effectState === "failed",
-    );
+    const hasFailedAction = record.actions.some((a) => hasOpenFailure(a));
     const hasFailedVerification = record.verification.some(
       (v) => v.status === "failed",
     );
@@ -1018,7 +1085,9 @@ export class RunStore {
         (v) => v.status === "passed" && HOST_PROOF_KINDS.has(v.proofKind),
       ) &&
       record.actions
-        .filter((a) => a.mutating && a.effectState !== "not_applied")
+        .filter(
+          (a) => a.mutating && a.effectState !== "not_applied" && !a.resolution,
+        )
         .every((a) =>
           record.verification.some(
             (v) =>
