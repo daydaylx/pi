@@ -15,6 +15,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { PiSystemHost, filterBackendEnv } from "../host.mjs";
+import { RunStore } from "../runs.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fakePi = path.join(here, "fixtures", "fake-system-host-pi.mjs");
@@ -38,10 +39,19 @@ test("queued run starts after the prompt reservation grace period", async () => 
   };
 
   try {
-    host.schedulePromptReservationRelease();
+    host.reservePrompt("test-request");
+    host.schedulePromptReservationRelease("test-request");
     await waitFor(() => started);
     assert.equal(started.run, queued);
     assert.equal(started.message, "queued prompt");
+    started = undefined;
+    host.stopping = true;
+    host.maybeStartNextQueuedRun();
+    assert.equal(
+      started,
+      undefined,
+      "shutdown must not dispatch another queued run",
+    );
   } finally {
     host.clearPromptReservation();
     rmSync(temp, { recursive: true, force: true });
@@ -593,10 +603,8 @@ test(
     env,
     runtimeDir: temp,
     runtimePath: fakePi,
-    // Die Fake-Freigabe entsteht schon beim Start des Hosts; bis der Client
-    // verbunden und per hello angemeldet ist, darf sie nicht ablaufen. Mit 5 s
-    // schlug der Test auf langsamen oder ausgelasteten Läufern gelegentlich fehl
-    // (der Client sah die Anfrage nie und wartete bis zum Frame-Timeout).
+    // Die Fake-Freigabe wird erst nach dem initialen Session-Snapshot ausgelöst.
+    // So kann sie nicht abhängig von JSONL-Chunkgrenzen beim Start verschwinden.
     approvalTtlMs: 12_000,
     startupTimeoutMs: 45_000,
   });
@@ -613,6 +621,17 @@ test(
     const hello = await client.next((frame) => frame.kind === "hello");
     assert.equal(hello.hostEpoch, host.hostEpoch);
     assert.ok(hello.capabilities.includes("approval-envelope"));
+    client.send({
+      protocolVersion: 1,
+      kind: "request",
+      id: "trigger-approval",
+      method: "session.current",
+      params: {},
+    });
+    assert.equal(
+      (await client.next((frame) => frame.id === "trigger-approval")).ok,
+      true,
+    );
     const request = await client.next(
       (frame) => frame.event === "extension-ui.requested",
     );
@@ -1091,5 +1110,78 @@ test(
     assert.equal(host.pendingUi.size, 0);
   } finally {
     await cleanupHost(host, client, temp);
+  }
+});
+
+test("late prompt replies preserve the next reservation and unreadable ack stays uncertain", async () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-host-ack-order-"));
+  mkdirSync(path.join(temp, "agent"), { mode: 0o700 });
+  const host = new PiSystemHost({
+    env: { HOME: temp, PI_CODING_AGENT_DIR: path.join(temp, "agent") },
+    runtimeDir: temp,
+  });
+  host.runStore = new RunStore({
+    runsDir: host.profile.runs,
+    hostEpoch: "test",
+  });
+  host.state = { session: { id: "s" }, activity: { kind: "idle" } };
+  host.backend = { stdin: { writable: true, write() {} } };
+  const create = () =>
+    host.runStore.createRun({ sessionId: "s", message: "test" });
+  try {
+    const first = create();
+    host.dispatchRunBackendPrompt(first, "first");
+    const oldId = host.promptReservation.requestId;
+    host.handleRunLifecycleEvent("agent.settled", {});
+    assert.equal(first.state, "SUCCEEDED");
+    const second = create();
+    host.dispatchRunBackendPrompt(second, "second");
+    const newId = host.promptReservation.requestId;
+    host.handleRequestTimeout(oldId);
+    assert.equal(first.state, "SUCCEEDED");
+    assert.equal(
+      host.promptReservation.requestId,
+      newId,
+      "old timeout cannot release a different submit",
+    );
+    host.handleBackendFrameTooLarge();
+    assert.equal(second.state, "UNCERTAIN");
+    assert.equal(second.stateReason, "PROMPT_RESPONSE_UNREADABLE");
+    assert.equal(second.result.errorCode, "RESULT_TOO_LARGE");
+    assert.equal(host.promptReservation, undefined);
+    assert.equal(host.pending.size, 0);
+    assert.equal(
+      host.isBusy(),
+      true,
+      "durable uncertainty replaces the transport reservation",
+    );
+    // Idle snapshots and late success replies cannot claim a lost prompt was safe.
+    host.handleBackendFrame({
+      kind: "event",
+      event: "state.patch",
+      data: { activity: { kind: "idle" } },
+    });
+    host.handleBackendFrame({
+      kind: "response",
+      id: newId,
+      ok: true,
+      result: {},
+    });
+    assert.equal(second.state, "UNCERTAIN");
+    host.handleBackendFrame({
+      kind: "event",
+      event: "state.patch",
+      data: { activity: { kind: "responding" } },
+    });
+    assert.equal(
+      second.state,
+      "INVESTIGATING",
+      "an actual late agent start confirms dispatch",
+    );
+    assert.equal(second.result, null);
+  } finally {
+    host.clearPromptReservation();
+    for (const request of host.pending.values()) clearTimeout(request.timer);
+    rmSync(temp, { recursive: true, force: true });
   }
 });

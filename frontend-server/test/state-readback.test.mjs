@@ -457,7 +457,6 @@ test("the host repeats the state probe after a real mapped verification event", 
         sessionId: "s",
         message: "switch workspace",
       });
-      host.currentRunId = run.runId;
       const dispatch = (message) => {
         const frame = mapRuntimeEvent(message, 1);
         assert.equal(isValidEventData(frame.event, frame.data), true);

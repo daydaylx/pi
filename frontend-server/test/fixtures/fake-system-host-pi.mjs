@@ -3,6 +3,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import readline from "node:readline";
 
 let settleTimer;
+let stateRequestCount = 0;
 
 if (process.env.FAKE_PI_ENV_DUMP) {
   writeFileSync(process.env.FAKE_PI_ENV_DUMP, JSON.stringify(process.env));
@@ -136,7 +137,8 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
           messageCount: 0,
         },
       });
-      if (process.env.FAKE_PI_UI_REQUEST === "1") {
+      stateRequestCount += 1;
+      if (process.env.FAKE_PI_UI_REQUEST === "1" && stateRequestCount > 1) {
         send({
           type: "extension_ui_request",
           id: "fake-approval",
@@ -175,13 +177,28 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
         );
       }
       if (process.env.FAKE_PI_HANG_PROMPT === "1") return;
+      if (request.message?.includes("[NO_START]")) {
+        send({ id: request.id, type: "response", success: true, data: {} });
+        return;
+      }
+      if (request.message?.includes("[DELAY_START]")) {
+        if (!request.message.includes("[LOST_ACK]"))
+          send({ id: request.id, type: "response", success: true, data: {} });
+        setTimeout(() => {
+          send({ type: "agent_start" });
+          settleTimer = setTimeout(() => send({ type: "agent_settled" }), 100);
+        }, 200);
+        return;
+      }
       send({ type: "agent_start" });
-      send({
-        id: request.id,
-        type: "response",
-        success: true,
-        data: {},
-      });
+      if (!request.message?.includes("[LOST_ACK]")) {
+        send({
+          id: request.id,
+          type: "response",
+          success: true,
+          data: {},
+        });
+      }
       if (request.message?.includes("[PROVIDER_FAIL]")) {
         setTimeout(() => {
           send({
@@ -231,12 +248,17 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
         }, 80);
         return;
       }
-      if (request.message?.includes("[TOOL_HANG]")) {
+      if (
+        request.message?.includes("[TOOL_HANG]") ||
+        request.message?.includes("[APPLY_HANG]")
+      ) {
         setTimeout(() => {
           send({
             type: "tool_execution_start",
             toolCallId: "tc-hang-1",
-            toolName: "bash",
+            toolName: request.message.includes("[APPLY_HANG]")
+              ? "nixos_apply"
+              : "bash",
           });
         }, 50);
         return;

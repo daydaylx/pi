@@ -18,12 +18,7 @@ import {
   negotiateProtocolVersion,
   protocolError,
 } from "../npm/packages/frontend-protocol/dist/index.js";
-import {
-  ACTIVE_EXECUTION_STATES,
-  RunStore,
-  TERMINAL_RUN_STATES,
-  toPublicRunSnapshot,
-} from "./runs.mjs";
+import { RunStore, TERMINAL_RUN_STATES, toPublicRunSnapshot } from "./runs.mjs";
 import { releaseApplyJob } from "./state-readback.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -392,11 +387,11 @@ export class PiSystemHost {
     this.pendingUi = new Map();
     this.hostEpoch = undefined;
     this.runStore = undefined;
-    this.currentRunId = undefined;
     this.state = undefined;
-    this.activeRun = false;
-    this.uncertainRun = false;
-    this.promptReserved = false;
+    // Only legacy agent.* prompts lack a persistent RunStore record. Keep their
+    // unconfirmed transport outcome separate from run-backed business state.
+    this.legacyPromptUncertain = false;
+    this.promptReservation = undefined;
     this.promptReservationTimer = undefined;
     this.stopping = false;
   }
@@ -407,15 +402,7 @@ export class PiSystemHost {
       runsDir: this.profile.runs,
       hostEpoch: this.hostEpoch,
     });
-    const reconciledOnStartup = this.runStore.loadAndReconcileStartup(
-      this.hostEpoch,
-    );
-    if (
-      reconciledOnStartup.length > 0 ||
-      this.runStore.getActiveOrBlockingRun()?.state === "UNCERTAIN"
-    ) {
-      this.uncertainRun = true;
-    }
+    this.runStore.loadAndReconcileStartup(this.hostEpoch);
     await removeStaleSocket(this.socketPath);
     this.ready = new Promise((resolve, reject) => {
       this.readyResolve = resolve;
@@ -500,6 +487,17 @@ export class PiSystemHost {
       if (request.internalUi) {
         continue;
       }
+      if (request.internalRun) {
+        this.handleInternalRunBackendResponse(request, { ok: false, error });
+        continue;
+      }
+      if (
+        request.method === "agent.prompt" ||
+        request.method === "agent.followUp"
+      ) {
+        if (!request.startObserved) this.legacyPromptUncertain = true;
+        this.clearPromptReservation(request.requestId);
+      }
       request.client.inflight.delete(request.clientId);
       if (!request.client.socket.destroyed) {
         line(request.client.socket, {
@@ -545,31 +543,30 @@ export class PiSystemHost {
         request.method === "agent.prompt" ||
         request.method === "agent.followUp";
       if (startsTurn) {
-        if (!frame.ok && frame.error?.code !== "REQUEST_TIMEOUT") {
-          this.clearPromptReservation();
-        } else if (frame.error?.code === "REQUEST_TIMEOUT") {
-          this.activeRun = true;
-          this.uncertainRun = true;
-          this.clearPromptReservation();
-        } else if (!this.activeRun) {
-          this.schedulePromptReservationRelease();
+        if (!frame.ok) {
+          if (
+            ["REQUEST_TIMEOUT", "RESULT_TOO_LARGE"].includes(
+              frame.error?.code,
+            ) &&
+            !request.startObserved
+          )
+            this.legacyPromptUncertain = true;
+          this.clearPromptReservation(request.requestId);
+        } else {
+          this.schedulePromptReservationRelease(request.requestId);
         }
       }
       if (request.method === "session.current" && frame.ok) {
-        const hasUncertainRunRecord =
-          this.runStore?.getActiveOrBlockingRun()?.state === "UNCERTAIN";
         if (
           frame.result?.isStreaming === false &&
           this.pendingUi.size === 0 &&
-          !hasUncertainRunRecord
+          !this.promptReservation
         ) {
-          this.activeRun = false;
-          this.uncertainRun = false;
-          this.clearPromptReservation();
+          this.state.activity = { kind: "idle" };
+          this.legacyPromptUncertain = false;
         } else if (frame.result?.isStreaming === true) {
-          this.activeRun = true;
-          if (!hasUncertainRunRecord) this.uncertainRun = false;
-          this.clearPromptReservation();
+          this.state.activity = { kind: "responding" };
+          this.updateRunState();
         }
       }
       if (request.method === "ui.respond" && frame.ok) {
@@ -710,9 +707,6 @@ export class PiSystemHost {
           },
           eventName: "run.settled",
         });
-        if (this.currentRunId === record.runId) {
-          this.currentRunId = undefined;
-        }
         this.broadcastRunEvent("run.settled", record);
       }
     }
@@ -740,41 +734,99 @@ export class PiSystemHost {
     resolve?.();
   }
 
-  updateRunState() {
-    const active =
+  isRuntimeActive() {
+    return (
       this.state?.activity?.kind === "responding" ||
       Boolean(this.state?.permissions?.pending) ||
-      this.pendingUi.size > 0;
-    this.activeRun = active;
-    const hasUncertainRunRecord =
-      this.runStore?.getActiveOrBlockingRun()?.state === "UNCERTAIN";
-    if (hasUncertainRunRecord) {
-      this.uncertainRun = true;
-    } else if (active) {
-      this.uncertainRun = false;
-      this.clearPromptReservation();
-    } else if (!this.uncertainRun && !this.promptReserved) {
-      this.clearPromptReservation();
+      this.pendingUi.size > 0
+    );
+  }
+
+  hasUncertainRun() {
+    return (
+      this.runStore?.getActiveOrBlockingRun()?.state === "UNCERTAIN" ||
+      this.legacyPromptUncertain
+    );
+  }
+
+  updateRunState() {
+    if (this.state?.activity?.kind !== "responding") return;
+    this.legacyPromptUncertain = false;
+    for (const request of this.pending.values()) {
+      if (
+        request.method === "agent.prompt" ||
+        request.method === "agent.followUp"
+      )
+        request.startObserved = true;
+    }
+    this.clearPromptReservation();
+    const record = this.getCurrentOrBlockingRun();
+    if (
+      record &&
+      [
+        "TURN_STARTING",
+        "PROMPT_REQUEST_TIMEOUT",
+        "PROMPT_START_UNCONFIRMED",
+        "PROMPT_RESPONSE_UNREADABLE",
+      ].includes(record.stateReason)
+    ) {
+      this.runStore.transition(record, {
+        state: "INVESTIGATING",
+        stateReason: "TURN_STARTED",
+        lastStep: "agent.start_observed",
+        result: null,
+      });
+      this.broadcastRunEvent("run.updated", record);
     }
   }
 
-  schedulePromptReservationRelease() {
+  reservePrompt(requestId, runId) {
     this.clearPromptReservation();
-    this.promptReserved = true;
+    this.promptReservation = { requestId, runId };
+  }
+
+  schedulePromptReservationRelease(requestId) {
+    if (
+      !this.promptReservation ||
+      this.promptReservation.requestId !== requestId
+    )
+      return;
+    const reservation = this.promptReservation;
+    clearTimeout(this.promptReservationTimer);
     this.promptReservationTimer = setTimeout(() => {
-      this.promptReserved = false;
-      this.promptReservationTimer = undefined;
+      this.clearPromptReservation(requestId);
+      const record = this.runStore?.runs?.get(reservation.runId);
+      if (record?.stateReason === "TURN_STARTING") {
+        this.markRunPromptUncertain(record, "PROMPT_START_UNCONFIRMED");
+      }
       this.maybeStartNextQueuedRun();
     }, this.promptStartGraceMs);
     this.promptReservationTimer.unref?.();
   }
 
-  clearPromptReservation() {
-    this.promptReserved = false;
-    if (this.promptReservationTimer) {
-      clearTimeout(this.promptReservationTimer);
-      this.promptReservationTimer = undefined;
-    }
+  clearPromptReservation(requestId) {
+    if (requestId && this.promptReservation?.requestId !== requestId) return;
+    this.promptReservation = undefined;
+    clearTimeout(this.promptReservationTimer);
+    this.promptReservationTimer = undefined;
+  }
+
+  markRunPromptUncertain(record, reason, errorCode = "REQUEST_TIMEOUT") {
+    this.runStore.transition(record, {
+      state: "UNCERTAIN",
+      stateReason: reason,
+      lastStep: "prompt.start_unconfirmed",
+      result: {
+        outcome: "uncertain",
+        partial: record.actions.some((a) => a.effectState === "applied"),
+        errorCode,
+        message:
+          "Backend prompt start is unconfirmed; inspect state before retrying",
+        verificationRefs: [],
+      },
+      eventName: "run.reconcile_required",
+    });
+    this.broadcastRunEvent("run.reconcile_required", record);
   }
 
   scheduleVerificationDeadline(record) {
@@ -784,10 +836,8 @@ export class PiSystemHost {
       if (this.stopping || record.state !== "VERIFYING") return;
       this.runStore.finishWithoutProof(record);
       if (record.state === "UNCERTAIN") {
-        this.uncertainRun = true;
         this.broadcastRunEvent("run.reconcile_required", record);
       } else {
-        if (this.currentRunId === record.runId) this.currentRunId = undefined;
         this.broadcastRunEvent("run.settled", record);
       }
     }, this.verificationTimeoutMs);
@@ -916,16 +966,7 @@ export class PiSystemHost {
   }
 
   getCurrentOrBlockingRun() {
-    if (!this.runStore) return null;
-    if (this.currentRunId) {
-      try {
-        const cur = this.runStore.getRun(this.currentRunId);
-        if (cur && !TERMINAL_RUN_STATES.has(cur.state)) return cur;
-      } catch {
-        // Ignore corrupt lookup here
-      }
-    }
-    return this.runStore.getActiveOrBlockingRun();
+    return this.runStore?.getActiveOrBlockingRun() ?? null;
   }
 
   broadcastRunEvent(eventName, record, extra = {}) {
@@ -989,13 +1030,10 @@ export class PiSystemHost {
         },
         eventName: "run.settled",
       });
-      this.currentRunId = undefined;
       this.broadcastRunEvent("run.settled", record);
       return false;
     }
 
-    this.currentRunId = record.runId;
-    this.promptReserved = true;
     this.runStore.transition(record, {
       state: "INVESTIGATING",
       stateReason: "TURN_STARTING",
@@ -1012,11 +1050,13 @@ export class PiSystemHost {
     timer.unref?.();
     this.pending.set(backendId, {
       internalRun: true,
+      requestId: backendId,
       runId: record.runId,
       method: "agent.prompt",
       timer,
     });
 
+    this.reservePrompt(backendId, record.runId);
     try {
       line(this.backend.stdin, {
         protocolVersion: PROTOCOL_VERSION,
@@ -1043,7 +1083,6 @@ export class PiSystemHost {
         },
         eventName: "run.settled",
       });
-      this.currentRunId = undefined;
       this.broadcastRunEvent("run.settled", record);
       return false;
     }
@@ -1051,59 +1090,63 @@ export class PiSystemHost {
 
   handleInternalRunBackendResponse(request, frame) {
     const record = this.runStore?.runs.get(request.runId);
-    if (!record) return;
-    if (request.method === "agent.prompt") {
-      if (!frame.ok) {
-        this.clearPromptReservation();
-        if (frame.error?.code === "REQUEST_TIMEOUT") {
-          this.activeRun = true;
-          this.uncertainRun = true;
-          this.runStore.transition(record, {
-            state: "UNCERTAIN",
-            stateReason: "PROMPT_REQUEST_TIMEOUT",
-            lastStep: "prompt.timeout",
-            result: {
-              outcome: "uncertain",
-              partial: record.actions.some((a) => a.effectState === "applied"),
-              errorCode: "REQUEST_TIMEOUT",
-              message:
-                "Backend prompt request timed out; inspect state before retrying",
-              verificationRefs: [],
-            },
-            eventName: "run.reconcile_required",
-          });
-          this.broadcastRunEvent("run.reconcile_required", record);
-        } else {
-          this.runStore.transition(record, {
-            state: "FAILED",
-            stateReason: "PROMPT_REJECTED_BY_BACKEND",
-            lastStep: "prompt.rejected",
-            result: {
-              outcome: "failed",
-              partial: false,
-              errorCode: frame.error?.code ?? "INTERNAL_ERROR",
-              message:
-                frame.error?.message ?? "Backend rejected run prompt request",
-              verificationRefs: [],
-            },
-            eventName: "run.settled",
-          });
-          if (this.currentRunId === record.runId) {
-            this.currentRunId = undefined;
-          }
-          this.broadcastRunEvent("run.settled", record);
-          this.maybeStartNextQueuedRun();
-        }
-      } else if (!this.activeRun) {
-        this.schedulePromptReservationRelease();
-      }
+    if (!record || request.method !== "agent.prompt") return;
+    // A transport reply cannot reopen a settled run or override observed work.
+    if (record.stateReason !== "TURN_STARTING") {
+      this.clearPromptReservation(request.requestId);
+      return;
+    }
+    if (frame.ok) {
+      this.schedulePromptReservationRelease(request.requestId);
+      return;
+    }
+    this.clearPromptReservation(request.requestId);
+    if (["REQUEST_TIMEOUT", "RESULT_TOO_LARGE"].includes(frame.error?.code)) {
+      this.markRunPromptUncertain(
+        record,
+        frame.error.code === "REQUEST_TIMEOUT"
+          ? "PROMPT_REQUEST_TIMEOUT"
+          : "PROMPT_RESPONSE_UNREADABLE",
+        frame.error.code,
+      );
+    } else {
+      this.runStore.transition(record, {
+        state: "FAILED",
+        stateReason: "PROMPT_REJECTED_BY_BACKEND",
+        lastStep: "prompt.rejected",
+        result: {
+          outcome: "failed",
+          partial: false,
+          errorCode: frame.error?.code ?? "INTERNAL_ERROR",
+          message:
+            frame.error?.message ?? "Backend rejected run prompt request",
+          verificationRefs: [],
+        },
+        eventName: "run.settled",
+      });
+      this.broadcastRunEvent("run.settled", record);
+      this.maybeStartNextQueuedRun();
     }
   }
 
   handleRunLifecycleEvent(event, data) {
     if (!this.runStore) return;
+    if (event === "agent.settled") {
+      this.clearPromptReservation();
+      this.legacyPromptUncertain = false;
+      for (const request of this.pending.values()) {
+        if (
+          request.method === "agent.prompt" ||
+          request.method === "agent.followUp"
+        )
+          request.startObserved = true;
+      }
+    }
     const record = this.getCurrentOrBlockingRun();
-    if (!record || TERMINAL_RUN_STATES.has(record.state)) return;
+    if (!record || TERMINAL_RUN_STATES.has(record.state)) {
+      if (event === "agent.settled") this.maybeStartNextQueuedRun();
+      return;
+    }
 
     if (event === "error") {
       // Do not persist provider messages, which can contain request secrets.
@@ -1212,12 +1255,8 @@ export class PiSystemHost {
       if (record.state === "VERIFYING")
         this.scheduleVerificationDeadline(record);
       if (record.state === "UNCERTAIN") {
-        this.uncertainRun = true;
         this.broadcastRunEvent("run.reconcile_required", record);
       } else if (TERMINAL_RUN_STATES.has(record.state)) {
-        if (this.currentRunId === record.runId) {
-          this.currentRunId = undefined;
-        }
         this.broadcastRunEvent("run.settled", record);
         if (record.state === "SUCCEEDED") {
           this.maybeStartNextQueuedRun();
@@ -1236,7 +1275,6 @@ export class PiSystemHost {
           action.effectState = "unknown";
         }
       }
-      this.uncertainRun = true;
       this.runStore.transition(record, {
         state: "UNCERTAIN",
         stateReason: "BACKEND_DISCONNECTED",
@@ -1256,7 +1294,7 @@ export class PiSystemHost {
   }
 
   maybeStartNextQueuedRun() {
-    if (!this.runStore || this.isBusy()) return;
+    if (this.stopping || !this.runStore || this.isBusy()) return;
     const nextQueued = this.runStore.getNextQueuedRun();
     if (!nextQueued) return;
     const msg = nextQueued.pendingMessage ?? nextQueued.title;
@@ -1453,8 +1491,8 @@ export class PiSystemHost {
 
         if (
           record.state === "VERIFYING" &&
-          !this.activeRun &&
-          !this.promptReserved
+          !this.isRuntimeActive() &&
+          !this.promptReservation
         ) {
           this.runStore.transition(record, {
             state: "CANCELLED",
@@ -1470,9 +1508,6 @@ export class PiSystemHost {
             },
             eventName: "run.settled",
           });
-          if (this.currentRunId === record.runId) {
-            this.currentRunId = undefined;
-          }
           this.broadcastRunEvent("run.settled", record);
           this.sendClientResult(client, id, method, {
             run: toPublicRunSnapshot(record),
@@ -1550,15 +1585,6 @@ export class PiSystemHost {
           return;
         }
         this.runStore.reconcileRun(record, params);
-        const stillUncertain =
-          this.runStore.getActiveOrBlockingRun()?.state === "UNCERTAIN";
-        this.uncertainRun = Boolean(stillUncertain);
-        if (
-          TERMINAL_RUN_STATES.has(record.state) &&
-          this.currentRunId === record.runId
-        ) {
-          this.currentRunId = undefined;
-        }
         const outEvent = TERMINAL_RUN_STATES.has(record.state)
           ? "run.settled"
           : "run.updated";
@@ -1683,7 +1709,7 @@ export class PiSystemHost {
         frame.method === "agent.prompt" ||
         ((frame.method === "agent.steer" ||
           frame.method === "agent.followUp") &&
-          (this.uncertainRun || this.promptReserved)))
+          (this.hasUncertainRun() || this.promptReservation)))
     ) {
       this.sendClientError(
         client,
@@ -1709,13 +1735,13 @@ export class PiSystemHost {
       }
       pendingUi.responding = true;
     }
+    const backendId = `host-${randomUUID()}`;
     if (
       frame.method === "agent.prompt" ||
       (frame.method === "agent.followUp" && !this.isBusy())
     ) {
-      this.promptReserved = true;
+      this.reservePrompt(backendId);
     }
-    const backendId = `host-${randomUUID()}`;
     const timer = setTimeout(() => {
       this.handleRequestTimeout(backendId);
     }, this.requestTimeoutMs);
@@ -1724,6 +1750,7 @@ export class PiSystemHost {
     this.pending.set(backendId, {
       client,
       clientId: frame.id,
+      requestId: backendId,
       method: frame.method,
       uiId,
       timer,
@@ -1786,9 +1813,8 @@ export class PiSystemHost {
     const startsTurn =
       request.method === "agent.prompt" || request.method === "agent.followUp";
     if (startsTurn) {
-      this.activeRun = true;
-      this.uncertainRun = true;
-      this.clearPromptReservation();
+      if (!request.startObserved) this.legacyPromptUncertain = true;
+      this.clearPromptReservation(request.requestId);
     }
     if (!request.client.socket.destroyed) {
       this.sendClientError(
@@ -1801,18 +1827,11 @@ export class PiSystemHost {
   }
 
   isBusy() {
-    const activeRunRecord = this.getCurrentOrBlockingRun();
-    const hasActiveRunRecord = Boolean(
-      activeRunRecord &&
-      (ACTIVE_EXECUTION_STATES.has(activeRunRecord.state) ||
-        activeRunRecord.state === "UNCERTAIN"),
-    );
-    return (
-      this.activeRun ||
-      this.uncertainRun ||
-      this.promptReserved ||
-      this.pendingUi.size > 0 ||
-      hasActiveRunRecord
+    return Boolean(
+      this.getCurrentOrBlockingRun() ||
+      this.isRuntimeActive() ||
+      this.legacyPromptUncertain ||
+      this.promptReservation,
     );
   }
 

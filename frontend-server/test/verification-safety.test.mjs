@@ -168,7 +168,6 @@ test("trusted runtime file check traverses the real host lifecycle and cannot co
       sessionId: "s",
       message: "write expected file",
     });
-    host.currentRunId = r.runId;
     const dispatch = (message) => {
       const f = mapRuntimeEvent(message, 1);
       host.handleRunLifecycleEvent(f.event, f.data);
@@ -313,7 +312,6 @@ test("verification deadline ends missing proofs but never frees an open external
         unit: "mako.service",
         action: "start",
       });
-      host.currentRunId = r.runId;
       host.handleRunLifecycleEvent("agent.settled", { aborted: false });
       assert.equal(r.state, "VERIFYING");
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -334,7 +332,6 @@ test("verification deadline ends missing proofs but never frees an open external
         externalJobId: "pi-job-11111111-1111-1111-1111-111111111111",
       });
       if (withOpaque) finish(r, "project_check");
-      host.currentRunId = r.runId;
       host.handleRunLifecycleEvent("agent.settled", { aborted: false });
       await new Promise((resolve) => setTimeout(resolve, 20));
       assert.equal(
@@ -349,7 +346,6 @@ test("verification deadline ends missing proofs but never frees an open external
     }
     const r = create();
     finish(r, "write", { path: path.join(dir, "goal") });
-    host.currentRunId = r.runId;
     host.handleRunLifecycleEvent("agent.settled", { aborted: false });
     writeFileSync(path.join(dir, "goal"), "proof");
     store.verifyFileReadback(r, {

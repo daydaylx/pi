@@ -340,7 +340,6 @@ test(
           checkId: "isolated-file-readback",
         });
         host.broadcastRunEvent("run.settled", record);
-        host.currentRunId = undefined;
         host.maybeStartNextQueuedRun();
       };
       verify(runId1);
@@ -427,7 +426,7 @@ test(
 
       // 4. Test host crash/restart while a mutating tool is in-flight ([TOOL_HANG])
       const hangSubmit = await c1.request("sub-hang", "run.submit", {
-        message: "Mutate system state [TOOL_HANG]",
+        message: "Mutate system state [APPLY_HANG]",
         title: "Interrupted system mutation",
       });
       assert.equal(hangSubmit.ok, true);
@@ -474,6 +473,27 @@ test(
       assert.equal(currentAfterRestart.result.run.runId, hangRunId);
       assert.equal(currentAfterRestart.result.run.state, "UNCERTAIN");
       assert.equal(
+        currentAfterRestart.result.run.actions[0].toolName,
+        "nixos_apply",
+      );
+      assert.equal(
+        currentAfterRestart.result.run.actions[0].effectState,
+        "unknown",
+      );
+      const blockedApply = await cAfter.request(
+        "no-repeat-apply",
+        "run.submit",
+        {
+          message: "Must not repeat apply [APPLY_HANG]",
+        },
+      );
+      assert.equal(blockedApply.error.code, "RUN_CONFLICT");
+      assert.equal(
+        readFileSync(promptLog, "utf8").trim().split(/\r?\n/).filter(Boolean)
+          .length,
+        promptLinesBeforeRestart,
+      );
+      assert.equal(
         currentAfterRestart.result.run.stateReason,
         "HOST_RESTARTED_DURING_ACTIVE_RUN",
       );
@@ -502,8 +522,6 @@ test(
         notes: "Trusted test operator inspection",
       });
 
-      host.uncertainRun = false;
-      host.activeRun = false;
       const resumeRes = await cAfter.request("res-ok", "run.resume", {
         runId: hangRunId,
         message: "Safe resumed execution [TOOL_OK]",
@@ -525,6 +543,32 @@ test(
       const pingRes = await cAfter.request("v1-ping", "system.ping");
       assert.equal(pingRes.ok, true);
       assert.equal(pingRes.result.pong, true);
+
+      // A queued run also starts after a legacy turn which has no RunStore record.
+      assert.equal(
+        (
+          await cAfter.request("legacy-turn", "agent.prompt", {
+            message: "Legacy turn before queued run",
+          })
+        ).ok,
+        true,
+      );
+      const legacyQueued = await cAfter.request("legacy-queued", "run.submit", {
+        message: "Queued after legacy turn",
+        queue: true,
+      });
+      assert.equal(legacyQueued.result.run.queued, true);
+      const legacyQueuedId = legacyQueued.result.run.runId;
+      assert.equal(
+        (
+          await cAfter.next(
+            (f) =>
+              f.event === "run.settled" && f.data.run.runId === legacyQueuedId,
+            8_000,
+          )
+        ).data.run.state,
+        "SUCCEEDED",
+      );
 
       // 6. Test 100+ concurrent/retry run.submit requests with same clientSubmissionId -> 0 duplicates
       const promptLinesBefore100 = readFileSync(promptLog, "utf8")
@@ -776,7 +820,6 @@ test("runtime adapter and host preserve default-read repair identity without gue
         sessionId: "s",
         message: "read repair",
       });
-      host.currentRunId = r.runId;
       for (const isError of [true, false]) {
         const toolCallId = `read-${isError}`;
         for (const message of [
@@ -800,3 +843,218 @@ test("runtime adapter and host preserve default-read repair identity without gue
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test(
+  "run authority survives delayed start, lost ack, reconnect and restart without flag repairs",
+  { timeout: 90_000 },
+  async () => {
+    const temp = mkdtempSync(
+      path.join(os.tmpdir(), "pi-host-state-authority-"),
+    );
+    const agentDir = path.join(temp, "agent");
+    const promptLog = path.join(temp, "prompts.log");
+    mkdirSync(agentDir, { recursive: true, mode: 0o700 });
+    writeFileSync(promptLog, "");
+    const makeHost = (runtimeTimeout = "600") =>
+      new PiSystemHost({
+        env: {
+          ...process.env,
+          HOME: temp,
+          PI_CODING_AGENT_DIR: agentDir,
+          PI_FRONTEND_REQUEST_TIMEOUT_MS: runtimeTimeout,
+          PI_SYSTEM_HOST_ENV_PASSTHROUGH: "FAKE_PI_PROMPT_LOG",
+          FAKE_PI_PROMPT_LOG: promptLog,
+        },
+        runtimeDir: temp,
+        runtimePath: fakePi,
+        promptStartGraceMs: 30,
+        startupTimeoutMs: 45_000,
+      });
+    let host = makeHost();
+    const clients = [];
+    const promptCount = () =>
+      readFileSync(promptLog, "utf8").split("\n").filter(Boolean).length;
+    try {
+      await host.start();
+      const { client } = await connectAndHello(host.socketPath);
+      clients.push(client);
+      const delayed = await client.request("delayed", "run.submit", {
+        message: "[DELAY_START]",
+        clientSubmissionId: "delayed-start",
+      });
+      const delayedId = delayed.result.run.runId;
+      const unconfirmed = await client.next(
+        (f) =>
+          f.event === "run.reconcile_required" &&
+          f.data.run.runId === delayedId,
+      );
+      assert.equal(
+        unconfirmed.data.run.stateReason,
+        "PROMPT_START_UNCONFIRMED",
+      );
+      assert.equal(
+        host.promptReservation,
+        undefined,
+        "reservation ends, durable uncertainty blocks instead",
+      );
+      assert.equal(
+        (
+          await client.request("duplicate", "run.submit", {
+            message: "[DELAY_START]",
+            clientSubmissionId: "delayed-start",
+          })
+        ).result.run.runId,
+        delayedId,
+      );
+      const blocked = await client.request("blocked", "run.submit", {
+        message: "Must not start",
+        queue: true,
+      });
+      assert.equal(blocked.error.code, "RUN_CONFLICT");
+      await client.request("idle-inspection", "session.current");
+      assert.equal(
+        host.runStore.getRun(delayedId).state,
+        "UNCERTAIN",
+        "idle readback cannot erase durable run uncertainty",
+      );
+      const { client: reconnected } = await connectAndHello(
+        host.socketPath,
+        "reconnected",
+      );
+      clients.push(reconnected);
+      const reconnectEvent = await reconnected.next(
+        (f) => f.event === "run.reconcile_required",
+      );
+      assert.equal(reconnectEvent.data.run.runId, delayedId);
+      await client.next(
+        (f) => f.event === "run.settled" && f.data.run.runId === delayedId,
+      );
+      assert.equal(host.runStore.getRun(delayedId).state, "SUCCEEDED");
+      assert.equal(
+        (await client.request("current-after-settle", "run.current")).result
+          .run,
+        null,
+      );
+      assert.equal(host.isBusy(), false);
+      assert.equal(
+        promptCount(),
+        1,
+        "delayed start and duplicate send one prompt",
+      );
+
+      const lostAck = await client.request("lost-ack", "run.submit", {
+        message: "[LOST_ACK]",
+        clientSubmissionId: "lost-ack",
+      });
+      const lostId = lostAck.result.run.runId;
+      const queued = await client.request("queued", "run.submit", {
+        message: "Queued after lost ack",
+        queue: true,
+      });
+      const queuedId = queued.result.run.runId;
+      assert.equal(queued.result.run.queued, true);
+      await client.next(
+        (f) => f.event === "run.settled" && f.data.run.runId === lostId,
+      );
+      await client.next(
+        (f) => f.event === "run.settled" && f.data.run.runId === queuedId,
+      );
+      assert.equal(
+        host.runStore.getRun(lostId).state,
+        "SUCCEEDED",
+        "late ack timeout cannot reopen settled run",
+      );
+      assert.equal(
+        host.isBusy(),
+        false,
+        "late transport reply cannot leave a stale busy flag",
+      );
+      assert.equal(
+        promptCount(),
+        3,
+        "queued run sent once despite missing prior ack",
+      );
+
+      const noStart = await client.request("no-start", "run.submit", {
+        message: "[NO_START]",
+        clientSubmissionId: "never-started",
+      });
+      const noStartId = noStart.result.run.runId;
+      await client.next(
+        (f) =>
+          f.event === "run.reconcile_required" &&
+          f.data.run.runId === noStartId,
+      );
+      const beforeRestart = promptCount();
+      for (const c of clients) c.socket.destroy();
+      await host.stop();
+      host = makeHost("100");
+      await host.start();
+      const { client: after } = await connectAndHello(
+        host.socketPath,
+        "after-restart",
+      );
+      clients.push(after);
+      const recovered = await after.request("recover", "run.submit", {
+        message: "[NO_START]",
+        clientSubmissionId: "never-started",
+      });
+      assert.equal(recovered.result.deduplicated, true);
+      assert.equal(recovered.result.run.runId, noStartId);
+      assert.equal(recovered.result.run.state, "UNCERTAIN");
+      assert.equal(
+        promptCount(),
+        beforeRestart,
+        "restart never replays an accepted uncertain prompt",
+      );
+      const denied = await after.request("resume-blocked", "run.resume", {
+        runId: noStartId,
+      });
+      assert.equal(denied.error.code, "RUN_CONFLICT");
+      // Only the trusted test operator can resolve this isolated no-effect fixture.
+      host.runStore.reconcileRun(host.runStore.getRun(noStartId), {
+        effectState: "not_applied",
+        notes: "isolated fake never starts",
+      });
+      assert.equal(
+        host.isBusy(),
+        false,
+        "RunStore reconciliation alone clears the run gate",
+      );
+
+      const timed = await after.request("timeout-start", "run.submit", {
+        message: "[DELAY_START] [LOST_ACK]",
+        clientSubmissionId: "timeout-start",
+      });
+      const timedId = timed.result.run.runId;
+      const timedUnknown = await after.next(
+        (f) =>
+          f.event === "run.reconcile_required" && f.data.run.runId === timedId,
+      );
+      assert.equal(timedUnknown.data.run.stateReason, "PROMPT_REQUEST_TIMEOUT");
+      assert.equal(
+        (
+          await after.request("timed-retry", "run.submit", {
+            message: "[DELAY_START] [LOST_ACK]",
+            clientSubmissionId: "timeout-start",
+          })
+        ).result.run.runId,
+        timedId,
+      );
+      await after.next(
+        (f) => f.event === "run.settled" && f.data.run.runId === timedId,
+      );
+      assert.equal(host.runStore.getRun(timedId).state, "SUCCEEDED");
+      assert.equal(
+        promptCount(),
+        beforeRestart + 1,
+        "late start is observed without redispatch",
+      );
+      assert.equal(host.isBusy(), false);
+    } finally {
+      for (const client of clients) client.socket.destroy();
+      await host.stop();
+      rmSync(temp, { recursive: true, force: true });
+    }
+  },
+);
