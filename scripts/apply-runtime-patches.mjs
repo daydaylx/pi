@@ -47,7 +47,7 @@ import { resolveRuntimeRoot } from "../shared/runtime-resolution.mjs";
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The runtime version these patches were written and verified against. */
-export const EXPECTED_RUNTIME_VERSION = "1.2.0";
+export const EXPECTED_RUNTIME_VERSION = "1.3.0";
 
 /**
  * One edit. `detect` proves the patch is already in place, `anchor` is the
