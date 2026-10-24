@@ -318,6 +318,7 @@ export class PiSystemHost {
     runtimePath = DEFAULT_RUNTIME,
     promptStartGraceMs = PROMPT_START_GRACE_MS,
     startupTimeoutMs = 10_000,
+    verificationTimeoutMs = 30_000,
     requestTimeoutMs,
     approvalTtlMs,
     maxBackendFrameChars = MAX_BACKEND_FRAME_CHARS,
@@ -357,6 +358,7 @@ export class PiSystemHost {
     };
     this.frontendPath = frontendPath;
     this.promptStartGraceMs = promptStartGraceMs;
+    this.verificationTimeoutMs = verificationTimeoutMs;
     this.startupTimeoutMs = startupTimeoutMs;
     this.maxBackendFrameChars = maxBackendFrameChars;
     const configuredTimeout = Number(
@@ -775,6 +777,23 @@ export class PiSystemHost {
     }
   }
 
+  scheduleVerificationDeadline(record) {
+    clearTimeout(this.verificationTimer);
+    this.verificationTimer = setTimeout(() => {
+      this.verificationTimer = undefined;
+      if (this.stopping || record.state !== "VERIFYING") return;
+      this.runStore.finishWithoutProof(record);
+      if (record.state === "UNCERTAIN") {
+        this.uncertainRun = true;
+        this.broadcastRunEvent("run.reconcile_required", record);
+      } else {
+        if (this.currentRunId === record.runId) this.currentRunId = undefined;
+        this.broadcastRunEvent("run.settled", record);
+      }
+    }, this.verificationTimeoutMs);
+    this.verificationTimer.unref?.();
+  }
+
   acceptClient(socket) {
     if (this.stopping || this.clients.size >= MAX_CLIENTS) {
       socket.destroy();
@@ -1086,6 +1105,17 @@ export class PiSystemHost {
     const record = this.getCurrentOrBlockingRun();
     if (!record || TERMINAL_RUN_STATES.has(record.state)) return;
 
+    if (event === "error") {
+      // Do not persist provider messages, which can contain request secrets.
+      record.executionError = true;
+      this.runStore.transition(record, {
+        stateReason: "AGENT_EXECUTION_FAILED",
+        lastStep: "agent.error_observed",
+      });
+      this.broadcastRunEvent("run.updated", record);
+      return;
+    }
+
     if (event === "tool.started") {
       this.runStore.recordToolStarted(record, {
         toolCallId: data?.toolCallId,
@@ -1179,6 +1209,8 @@ export class PiSystemHost {
 
     if (event === "agent.settled") {
       this.runStore.settleTurn(record, { aborted: data?.aborted === true });
+      if (record.state === "VERIFYING")
+        this.scheduleVerificationDeadline(record);
       if (record.state === "UNCERTAIN") {
         this.uncertainRun = true;
         this.broadcastRunEvent("run.reconcile_required", record);
@@ -1821,6 +1853,7 @@ export class PiSystemHost {
   async stop(exitCode = 0) {
     if (this.stopping) return;
     this.stopping = true;
+    clearTimeout(this.verificationTimer);
     this.clearPromptReservation();
     this.cancelPendingUi();
     for (const pending of this.pending.values()) {

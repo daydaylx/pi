@@ -1158,6 +1158,16 @@ export class RunStore {
       });
     }
 
+    if (
+      (hasFailedVerification || hasFailedAction || record.executionError) &&
+      record.actions.some(
+        (action) =>
+          action.effectState === "unknown" ||
+          (action.externalJob && !action.externalJobFinished),
+      )
+    )
+      return this.finishWithoutProof(record);
+
     if (hasFailedVerification) {
       return this.transition(record, {
         state: "FAILED",
@@ -1176,20 +1186,44 @@ export class RunStore {
       });
     }
 
-    if (hasFailedAction) {
+    if (hasFailedAction || record.executionError) {
       return this.transition(record, {
         state: "FAILED",
-        stateReason: "TOOL_EXECUTION_FAILED",
+        stateReason: record.executionError
+          ? "AGENT_EXECUTION_FAILED"
+          : "TOOL_EXECUTION_FAILED",
         lastStep: "turn.settled_with_tool_error",
         result: {
           outcome: "failed",
           partial: record.actions.some((a) => a.effectState === "applied"),
           errorCode: "TOOL_FAILED",
-          message: "One or more tool calls failed during run execution",
+          message: record.executionError
+            ? "Agent or provider failed during run execution"
+            : "One or more tool calls failed during run execution",
           verificationRefs: [],
         },
         eventName: "run.settled",
       });
+    }
+
+    // A completed turn cannot produce an independent proof for opaque tools.
+    // End the execution honestly, while retaining supported readback paths and
+    // never treating absent evidence as success or an unknown effect as known.
+    const unsupportedProof = record.actions.some(
+      (action) =>
+        action.mutating &&
+        !action.resolution &&
+        action.effectState === "applied" &&
+        !action.targetPath &&
+        !action.systemTarget,
+    );
+    if (
+      unsupportedProof ||
+      (record.requireVerification &&
+        record.actions.length === 0 &&
+        !hasPassedVerification)
+    ) {
+      return this.finishWithoutProof(record);
     }
 
     if (
@@ -1220,6 +1254,39 @@ export class RunStore {
           .map((v) => v.checkId),
       },
       eventName: "run.settled",
+    });
+  }
+
+  finishWithoutProof(record) {
+    const unknownEffect = record.actions.some(
+      (action) =>
+        action.effectState === "unknown" ||
+        (action.externalJob && !action.externalJobFinished) ||
+        (action.mutating && !action.finishedAt),
+    );
+    addUniqueBounded(
+      record.remaining_issues,
+      unknownEffect
+        ? "External effect still requires reconciliation"
+        : "Independent verification evidence is unavailable for the completed turn",
+    );
+    return this.transition(record, {
+      state: unknownEffect ? "UNCERTAIN" : "BLOCKED",
+      stateReason: unknownEffect
+        ? "EXTERNAL_EFFECT_AWAITING_RECONCILIATION"
+        : "VERIFICATION_UNAVAILABLE",
+      lastStep: "turn.completed_without_proof",
+      result: {
+        outcome: unknownEffect ? "uncertain" : "blocked",
+        partial: true,
+        message: unknownEffect
+          ? "Execution ended; external effect requires reconciliation"
+          : "Execution ended; independent verification evidence is missing",
+        verificationRefs: record.verification
+          .filter((v) => v.status === "passed")
+          .map((v) => v.checkId),
+      },
+      eventName: unknownEffect ? "run.reconcile_required" : "run.settled",
     });
   }
 

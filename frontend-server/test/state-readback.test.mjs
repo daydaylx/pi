@@ -120,10 +120,12 @@ test("matching generation cannot finish an unfinished, failed or unbound apply",
       requireVerification: true,
     });
     store.settleTurn(unbound);
-    store.verifySystemReadback(unbound, { goal, checkId: "no-action" });
-    store.settleTurn(unbound);
-    assert.equal(unbound.state, "VERIFYING");
-    assert.equal(unbound.verification[0].status, "pending");
+    assert.equal(unbound.state, "BLOCKED");
+    assert.throws(
+      () => store.verifySystemReadback(unbound, { goal, checkId: "no-action" }),
+      { code: "RUN_CONFLICT" },
+    );
+    assert.equal(unbound.verification.length, 0);
     const cancelled = create();
     store.settleTurn(cancelled, { aborted: true });
     assert.equal(cancelled.state, "UNCERTAIN");
@@ -336,11 +338,15 @@ test("system readback binds exact completed actions and requires a new invocatio
     assert.equal(wrongTarget.state, "VERIFYING");
     const shell = create();
     mutate(shell, service, false, "bash");
-    store.verifySystemReadback(shell, {
-      goal: service,
-      checkId: "cannot-cover-shell",
-    });
-    assert.equal(shell.state, "VERIFYING");
+    assert.throws(
+      () =>
+        store.verifySystemReadback(shell, {
+          goal: service,
+          checkId: "cannot-cover-shell",
+        }),
+      { code: "RUN_CONFLICT" },
+    );
+    assert.equal(shell.state, "BLOCKED");
     const stale = create();
     mutate(stale, workspace, false, "desktop_switch_workspace");
     store.verifySystemReadback(stale, { goal: workspace, checkId: "first" });

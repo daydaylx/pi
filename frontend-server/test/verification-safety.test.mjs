@@ -219,12 +219,151 @@ test("trusted runtime file check traverses the real host lifecycle and cannot co
       isError: false,
     });
     host.runStore.settleTurn(other);
-    host.runStore.verifyFileReadback(other, {
-      filePath,
-      expectedSha256,
-      checkId: "unrelated",
+    assert.throws(
+      () =>
+        host.runStore.verifyFileReadback(other, {
+          filePath,
+          expectedSha256,
+          checkId: "unrelated",
+        }),
+      { code: "RUN_CONFLICT" },
+    );
+    assert.equal(other.state, "BLOCKED");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("opaque completed actions terminate without claiming proof; inflight and external effects stay separate", () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "pi-unavailable-proof-"));
+  try {
+    const store = new RunStore({ runsDir: dir, hostEpoch: "test" });
+    for (const toolName of [
+      "audio_set_volume",
+      "notify",
+      "project_check",
+      "desktop_focus_window",
+      "bash",
+    ]) {
+      const r = store.createRun({
+        sessionId: "s",
+        message: "bounded completion",
+      });
+      store.recordToolStarted(r, { toolName, toolCallId: "opaque" });
+      store.recordToolFinished(r, {
+        toolName,
+        toolCallId: "opaque",
+        isError: false,
+      });
+      store.settleTurn(r);
+      assert.equal(r.state, "BLOCKED", toolName);
+      assert.equal(r.stateReason, "VERIFICATION_UNAVAILABLE");
+      assert.equal(r.result.outcome, "blocked");
+      assert.deepEqual(r.result.verificationRefs, []);
+      assert.ok(r.remaining_issues.length);
+    }
+    const inflight = store.createRun({ sessionId: "s", message: "inflight" });
+    store.recordToolStarted(inflight, {
+      toolName: "bash",
+      toolCallId: "inflight",
     });
-    assert.equal(other.state, "VERIFYING");
+    store.settleTurn(inflight);
+    assert.equal(inflight.state, "UNCERTAIN");
+    const aborted = store.createRun({ sessionId: "s", message: "abort" });
+    store.settleTurn(aborted, { aborted: true });
+    assert.equal(aborted.state, "CANCELLED");
+    const info = store.createRun({ sessionId: "s", message: "information" });
+    store.settleTurn(info);
+    assert.equal(info.state, "SUCCEEDED");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("verification deadline ends missing proofs but never frees an open external effect", async () => {
+  const { PiSystemHost } = await import("../host.mjs");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "pi-proof-deadline-"));
+  try {
+    mkdirSync(path.join(dir, "agent"));
+    const host = new PiSystemHost({
+      runtimeDir: dir,
+      env: { HOME: dir, PI_CODING_AGENT_DIR: path.join(dir, "agent") },
+      verificationTimeoutMs: 5,
+    });
+    host.runStore = new RunStore({
+      runsDir: path.join(dir, "runs"),
+      hostEpoch: "test",
+    });
+    const store = host.runStore;
+    const create = () =>
+      store.createRun({
+        sessionId: "s",
+        message: "bounded wait",
+        requireVerification: true,
+      });
+    const finish = (r, toolName, args = {}) => {
+      const toolCallId = `${toolName}-${r.actions.length}`;
+      store.recordToolStarted(r, { toolCallId, toolName, args });
+      store.recordToolFinished(r, { toolCallId, toolName, isError: false });
+    };
+    for (const tool of ["write", "user_service", "read"]) {
+      const r = create();
+      finish(r, tool, {
+        path: path.join(dir, "goal"),
+        unit: "mako.service",
+        action: "start",
+      });
+      host.currentRunId = r.runId;
+      host.handleRunLifecycleEvent("agent.settled", { aborted: false });
+      assert.equal(r.state, "VERIFYING");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(r.state, "BLOCKED", tool);
+      assert.equal(r.stateReason, "VERIFICATION_UNAVAILABLE");
+      assert.equal(store.getActiveOrBlockingRun(), null);
+    }
+    for (const withOpaque of [false, true]) {
+      const r = create();
+      store.recordToolStarted(r, {
+        toolName: "nixos_apply",
+        toolCallId: "apply",
+      });
+      store.recordToolFinished(r, {
+        toolName: "nixos_apply",
+        toolCallId: "apply",
+        isError: false,
+        externalJobId: "pi-job-11111111-1111-1111-1111-111111111111",
+      });
+      if (withOpaque) finish(r, "project_check");
+      host.currentRunId = r.runId;
+      host.handleRunLifecycleEvent("agent.settled", { aborted: false });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(
+        r.state,
+        "UNCERTAIN",
+        "open apply plus opaque work must retain reconciliation gate",
+      );
+      assert.equal(store.getActiveOrBlockingRun().runId, r.runId);
+      assert.equal(r.actions[0].externalJobFinished, undefined);
+      // Resolve only the isolated fixture gate so the next independent case can run.
+      r.state = "CANCELLED";
+    }
+    const r = create();
+    finish(r, "write", { path: path.join(dir, "goal") });
+    host.currentRunId = r.runId;
+    host.handleRunLifecycleEvent("agent.settled", { aborted: false });
+    writeFileSync(path.join(dir, "goal"), "proof");
+    store.verifyFileReadback(r, {
+      filePath: path.join(dir, "goal"),
+      expectedSha256: createHash("sha256").update("proof").digest("hex"),
+      checkId: "before-deadline",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      r.state,
+      "SUCCEEDED",
+      "deadline cannot replace a completed proof",
+    );
+    await host.stop();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

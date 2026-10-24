@@ -364,6 +364,45 @@ test(
       assert.equal(failSettled.data.run.state, "FAILED");
       assert.equal(failSettled.data.run.result.outcome, "failed");
 
+      const providerSubmit = await c1.request(
+        "sub-provider-fail",
+        "run.submit",
+        {
+          message: "Provider failure without tools [PROVIDER_FAIL]",
+        },
+      );
+      assert.equal(providerSubmit.ok, true);
+      const providerSettled = await c1.next(
+        (f) =>
+          f.event === "run.settled" &&
+          f.data.run.runId === providerSubmit.result.run.runId,
+      );
+      assert.equal(providerSettled.data.run.state, "FAILED");
+      assert.equal(
+        providerSettled.data.run.stateReason,
+        "AGENT_EXECUTION_FAILED",
+      );
+      assert.equal(providerSettled.data.run.actions.length, 0);
+      assert.doesNotMatch(
+        JSON.stringify(providerSettled),
+        /PRIVATE-PROVIDER-DETAIL/,
+      );
+      const opaqueSubmit = await c1.request("sub-opaque", "run.submit", {
+        message: "Completed check without goal proof [OPAQUE_OK]",
+      });
+      assert.equal(opaqueSubmit.ok, true);
+      const opaqueSettled = await c1.next(
+        (f) =>
+          f.event === "run.settled" &&
+          f.data.run.runId === opaqueSubmit.result.run.runId,
+      );
+      assert.equal(opaqueSettled.data.run.state, "BLOCKED");
+      assert.equal(
+        opaqueSettled.data.run.stateReason,
+        "VERIFICATION_UNAVAILABLE",
+      );
+      assert.equal(host.runStore.getActiveOrBlockingRun(), null);
+
       // 3. Test controlled cancel of normal active run -> CANCELLED
       const cancelSubmit = await c1.request("sub-cancel", "run.submit", {
         message: "Long normal turn",

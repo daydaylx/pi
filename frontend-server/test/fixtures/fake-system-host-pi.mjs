@@ -2,6 +2,8 @@
 import { appendFileSync, writeFileSync } from "node:fs";
 import readline from "node:readline";
 
+let settleTimer;
+
 if (process.env.FAKE_PI_ENV_DUMP) {
   writeFileSync(process.env.FAKE_PI_ENV_DUMP, JSON.stringify(process.env));
 }
@@ -180,6 +182,38 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
         success: true,
         data: {},
       });
+      if (request.message?.includes("[PROVIDER_FAIL]")) {
+        setTimeout(() => {
+          send({
+            type: "message_end",
+            message: {
+              role: "assistant",
+              stopReason: "error",
+              errorMessage: "PRIVATE-PROVIDER-DETAIL",
+              content: [],
+            },
+          });
+          send({ type: "agent_settled", aborted: false });
+        }, 80);
+        return;
+      }
+      if (request.message?.includes("[OPAQUE_OK]")) {
+        setTimeout(() => {
+          send({
+            type: "tool_execution_start",
+            toolCallId: "opaque",
+            toolName: "project_check",
+          });
+          send({
+            type: "tool_execution_end",
+            toolCallId: "opaque",
+            toolName: "project_check",
+            isError: false,
+          });
+          send({ type: "agent_settled", aborted: false });
+        }, 80);
+        return;
+      }
       if (request.message?.includes("[TOOL_FAIL]")) {
         setTimeout(() => {
           send({
@@ -225,10 +259,11 @@ if (process.env.FAKE_SYSTEM_HOST_BACKEND === "1") {
         }, 80);
         return;
       }
-      setTimeout(() => send({ type: "agent_settled" }), 350);
+      settleTimer = setTimeout(() => send({ type: "agent_settled" }), 350);
       return;
     }
     if (request.type === "abort") {
+      clearTimeout(settleTimer);
       send({
         id: request.id,
         type: "response",

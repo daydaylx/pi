@@ -1135,6 +1135,18 @@ export class FrontendServer {
   }
 
   handleRuntimeEvent(message) {
+    if (
+      message.type === "message_end" &&
+      message.message?.stopReason === "error"
+    ) {
+      this.emit("error", {
+        error: protocolError(
+          "INTERNAL_ERROR",
+          "Agent or provider failed during the turn",
+          randomUUID(),
+        ),
+      });
+    }
     if (message.type === "__exit") {
       this.runtime = undefined;
       this.state.session.connected = false;
