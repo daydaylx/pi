@@ -70,9 +70,10 @@ Prüfstände (`project_check`) sind pro freigegebener Wurzel getrennt.
 
 ## Git-Veröffentlichung
 
-Commits und Pushes brauchen keine Einzelfreigabe: nach jedem abgeschlossenen
-Teilschritt sofort in kleinen, thematisch getrennten Commits festhalten und
-direkt pushen. Nur eigene Dateien gezielt stagen (nie `git add -A`), Änderungen
+Commit und Push folgen jeweils der tatsächlich erteilten Autorisierung.
+Ein Umsetzungsauftrag allein erlaubt keinen Push. Ausdrückliche Grenzen des
+aktuellen Auftrags haben Vorrang; autorisierte Teilschritte klein und
+thematisch getrennt committen. Nur eigene Dateien gezielt stagen (nie `git add -A`), Änderungen
 anderer Sitzungen nicht mitcommitten. Force-Push und das Umschreiben gepushter
 Commits sind ausgeschlossen; Merge, Branch-Veröffentlichung und Deployment nur
 auf ausdrücklichen Auftrag. Commit und Push

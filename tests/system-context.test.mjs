@@ -479,6 +479,19 @@ async function main() {
   test("shared work contract reaches both effective profile prompts", () => {
     assert.match(sharedWorkContract, /## Eigenständige Problemlösung/);
     assert.match(sharedWorkContract, /ausdrücklich\s+lesenden Aufträgen/);
+    const rules = readFileSync(
+      new URL("../AGENTS.md", import.meta.url),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      rules,
+      /nie aus Projektnamen erraten|gleichwertige Korrekturen.*bestätigen lassen/,
+    );
+    assert.match(rules, /Ein Umsetzungsauftrag allein erlaubt keinen Push/);
+    assert.match(
+      rules,
+      /Bei behebbaren Fehlern zulässig nacharbeiten und erneut prüfen/,
+    );
     for (const profile of ["project", "system"]) {
       const { result } = runPrompt(profile, "Hallo", {
         systemPrompt: sharedWorkContract,
