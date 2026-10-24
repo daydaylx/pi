@@ -11,7 +11,9 @@ Beginne mit einer Read-only-Prüfung der vorhandenen Agent-Dokumentation. Respek
 - Bewerte Zweck, Aktualität, Redundanz und Widersprüche jeder Datei.
 - Prüfe Zahlen, Messwerte und Vergleichstabellen vor der Bewertung „veraltet“ mit `git log -S`/`git blame` auf Herkunft und Datum. Ein datierter Snapshot ist nicht veraltet; empfiehl dafür eine Kennzeichnung mit Stand statt Fortschreibung.
 - Schlage eine schlanke Zielstruktur vor und kennzeichne Archiv-Kandidaten statt sie eigenständig zu entfernen.
-- Nenne bei jeder Korrektur die Varianten (aktualisieren, kennzeichnen, löschen oder behalten) mit Empfehlung. Die Wahl trifft der Nutzer.
+- Prüfe Zahlen, Messwerte und Vergleichstabellen vor der Bewertung „veraltet“ mit `git log -S` oder `git blame` auf Herkunft und Datum. Ein datierter Snapshot ist nicht veraltet; empfehle dafür eine Kennzeichnung mit Stand statt Fortschreibung.
+- Schlage eine schlanke Zielstruktur vor und kennzeichne Archiv-Kandidaten statt sie eigenständig zu entfernen.
+- Nenne bei gleichwertigen Korrekturvarianten im Abschnitt „Konkrete nächste Schritte“ die Optionen (aktualisieren, kennzeichnen, löschen oder behalten) samt Empfehlung; die Wahl trifft der Nutzer.
 - Schreibe, verschiebe oder lösche keine Dokumente ohne ausdrücklichen Nutzerauftrag.
 
 Strukturiere das Ergebnis mit:

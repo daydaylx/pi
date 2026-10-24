@@ -27,8 +27,12 @@ Agent-Verzeichnisses liegt; Projektänderungen werden nur mit
 ## Trust-Gate
 
 - `.pi/verify.json` wird **nur in vertrauten Projekten** gelesen.
-- In nicht vertrauten Projekten wird die Datei komplett ignoriert (Diagnose:
-  „ignored until the project is trusted“).
+- Ausnahme: Im interaktiven `pi system`-Profil auf einer offenen
+  Berechtigungsstufe darf ein explizites, erreichbares `workspaceRoot` genau
+  dessen Prüfprofile laden und ausführen. Das ist kein Projekt-Trust für
+  andere Werkzeuge oder Ressourcen und erfordert kein `workspace_add`.
+- In normalen nicht vertrauten Projekten wird die Datei komplett ignoriert
+  (Diagnose: „ignored until the project is trusted“).
 - `/setup-doctor` zeigt den Status: Anzahl geladener Profile bzw. „ignoriert
   (untrusted)“.
 
@@ -43,10 +47,12 @@ project_check({ "profiles": ["typecheck", "tests"] })
 project_check({ "profile": "typecheck", "workspaceRoot": "/path/to/other-project" })
 ```
 
-`workspaceRoot` ist optional. Eine zusätzliche Projektwurzel muss zuvor in der
-aktuellen Sitzung mit `workspace_add({ path })` über den UI-Dialog freigegeben
-werden. Das Profil wird aus `<workspaceRoot>/.pi/verify.json` geladen und nur
-in dieser Wurzel ausgeführt; ohne Freigabe wird der Aufruf abgelehnt.
+`workspaceRoot` ist optional. Im normalen Projektmodus muss eine zusätzliche
+Projektwurzel zuvor in der aktuellen Sitzung mit `workspace_add({ path })` über
+den UI-Dialog freigegeben werden. Im offenen `pi system`-Profil kann eine
+explizit angegebene erreichbare Wurzel direkt verwendet werden; restriktive
+Berechtigungsstufen bleiben unverändert. Das Profil wird aus
+`<workspaceRoot>/.pi/verify.json` geladen und nur in dieser Wurzel ausgeführt.
 
 Bei `agent_settled` zeigt die Footer-Statuszeile den rein technischen
 Verifikationsstatus des aktuellen Workspace: `unchanged`, `changed_unverified`,
