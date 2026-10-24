@@ -524,7 +524,7 @@ await test("the session-health command reports without mutating anything", async
       .join("\n"),
   );
   try {
-    await runSessionHealthCommand();
+    await runSessionHealthCommand(agentDir);
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -532,7 +532,7 @@ await test("the session-health command reports without mutating anything", async
   }
 });
 
-async function runSessionHealthCommand() {
+async function runSessionHealthCommand(agentDir) {
   const harness = createHarness();
   sessionHealth.default(harness.api);
   const ctx = harness.makeContext();
@@ -549,6 +549,11 @@ async function runSessionHealthCommand() {
   eq(jsonNotice.level, "info", "a valid report is a normal notification");
   const parsed = JSON.parse(jsonNotice.message);
   eq(parsed.windowDays, 1, "the window is applied");
+  eq(
+    parsed.sessionsRoot,
+    join(agentDir, "sessions"),
+    "the legacy primary sessionsRoot field remains available",
+  );
   eq(parsed.sources.length, 3, "all three roots appear in structured output");
   eq(
     parsed.sources[0].role,

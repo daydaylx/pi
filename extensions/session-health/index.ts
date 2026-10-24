@@ -309,6 +309,7 @@ export default function sessionHealthExtension(pi: ExtensionAPI): void {
           JSON.stringify(
             {
               windowDays: parsed.days ?? null,
+              sessionsRoot: roots[0].path,
               sources,
               report: { ...report, usage: summarizeUsage(report.usage) },
               runHistoryRaw: rawHistory ?? null,
