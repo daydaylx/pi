@@ -1,5 +1,8 @@
+import strictAssert from "node:assert/strict";
 import { assert, test, counters as summary } from "./shared/assertions.mjs";
 import {
+  parseNpmAuditReport,
+  runNpmAudit,
   ACCEPTED_ADVISORIES,
   findUnexpectedAdvisories,
 } from "../scripts/check-npm-audit.mjs";
@@ -55,6 +58,174 @@ await test("findUnexpectedAdvisories reports nothing when every advisory is acce
     findUnexpectedAdvisories(report, ACCEPTED_ADVISORIES).length === 0,
     "no findings when every advisory URL is on the allowlist",
   );
+});
+
+await test("npm registry errors cannot be reported as a clean audit", () => {
+  const response = JSON.stringify({
+    error: { code: "E400", summary: "Bad Request" },
+  });
+  strictAssert.throws(
+    () =>
+      runNpmAudit("unused", () => {
+        throw Object.assign(new Error("npm failed"), {
+          status: 1,
+          stdout: Buffer.from(response),
+        });
+      }),
+    /no security verdict/,
+  );
+  strictAssert.throws(
+    () => runNpmAudit("unused", () => response),
+    /no security verdict/,
+  );
+  strictAssert.throws(() => parseNpmAuditReport("not json"), /unreadable JSON/);
+  assert(true, "registry errors and unreadable output fail closed");
+});
+
+await test("missing or truncated audit data never passes as zero findings", () => {
+  for (const value of [
+    null,
+    {},
+    { auditReportVersion: 2, vulnerabilities: {} },
+    {
+      auditReportVersion: 2,
+      vulnerabilities: {},
+      metadata: { vulnerabilities: { total: 1 } },
+    },
+    {
+      auditReportVersion: 2,
+      vulnerabilities: { broken: {} },
+      metadata: { vulnerabilities: { total: 1 } },
+    },
+    {
+      auditReportVersion: 2,
+      vulnerabilities: { broken: { via: [] } },
+      metadata: { vulnerabilities: { total: 1 } },
+    },
+    {
+      auditReportVersion: 2,
+      vulnerabilities: { broken: { via: [{}] } },
+      metadata: { vulnerabilities: { total: 1 } },
+    },
+    {
+      auditReportVersion: 2,
+      vulnerabilities: { broken: { via: ["missing-package"] } },
+      metadata: { vulnerabilities: { total: 1 } },
+    },
+  ])
+    strictAssert.throws(
+      () => parseNpmAuditReport(JSON.stringify(value)),
+      /no security verdict/,
+    );
+  assert(true, "incomplete audit responses are rejected");
+});
+
+await test("valid clean and nonzero-exit advisory reports remain usable", () => {
+  const clean = {
+    auditReportVersion: 2,
+    vulnerabilities: {},
+    metadata: { vulnerabilities: { total: 0 } },
+  };
+  strictAssert.deepEqual(
+    runNpmAudit("unused", () => JSON.stringify(clean)),
+    clean,
+  );
+  const finding = {
+    auditReportVersion: 2,
+    vulnerabilities: {
+      package: {
+        via: [
+          {
+            url: "https://github.com/advisories/GHSA-new-new-new",
+            title: "new",
+          },
+        ],
+      },
+    },
+    metadata: { vulnerabilities: { total: 1 } },
+  };
+  const report = runNpmAudit("unused", () => {
+    throw Object.assign(new Error("findings"), {
+      status: 1,
+      stdout: JSON.stringify(finding),
+    });
+  });
+  strictAssert.equal(
+    findUnexpectedAdvisories(report, ACCEPTED_ADVISORIES).length,
+    1,
+  );
+  const linked = structuredClone(finding);
+  linked.vulnerabilities.consumer = { via: ["package"] };
+  linked.metadata.vulnerabilities.total = 2;
+  strictAssert.deepEqual(parseNpmAuditReport(JSON.stringify(linked)), linked);
+  assert(true, "a valid finding is preserved despite npm's nonzero exit");
+});
+
+await test("abnormal process exits never turn partial stdout into a security verdict", () => {
+  const clean = JSON.stringify({
+    auditReportVersion: 2,
+    vulnerabilities: {},
+    metadata: { vulnerabilities: { total: 0 } },
+  });
+  for (const state of [
+    { status: 1 },
+    { status: null, signal: "SIGTERM", code: "ETIMEDOUT" },
+    { status: 1, code: "ETIMEDOUT" },
+    { status: 1, signal: "SIGTERM" },
+    { status: 1, code: "ENOBUFS" },
+    { status: 2 },
+    { status: 1, killed: true },
+  ])
+    strictAssert.throws(
+      () =>
+        runNpmAudit("unused", () => {
+          throw Object.assign(new Error("infrastructure failure"), state, {
+            stdout: clean,
+          });
+        }),
+      /no security verdict/,
+    );
+  assert(
+    true,
+    "signals, timeouts and unexplained clean nonzero exits fail closed",
+  );
+});
+
+await test("reference cycles need a real advisory source in every component", () => {
+  for (const vulnerabilities of [
+    { a: { via: ["a"] } },
+    { a: { via: ["b"] }, b: { via: ["a"] } },
+    {
+      a: { via: ["a"] },
+      source: { via: [{ url: "https://example.test/advisory" }] },
+    },
+  ])
+    strictAssert.throws(
+      () =>
+        parseNpmAuditReport(
+          JSON.stringify({
+            auditReportVersion: 2,
+            vulnerabilities,
+            metadata: {
+              vulnerabilities: { total: Object.keys(vulnerabilities).length },
+            },
+          }),
+        ),
+      /without advisory sources/,
+    );
+  const anchored = {
+    auditReportVersion: 2,
+    vulnerabilities: {
+      a: { via: ["b"] },
+      b: { via: ["a", { url: "https://example.test/advisory" }] },
+    },
+    metadata: { vulnerabilities: { total: 2 } },
+  };
+  strictAssert.deepEqual(
+    parseNpmAuditReport(JSON.stringify(anchored)),
+    anchored,
+  );
+  assert(true, "sourced cycles remain valid but unsourced components do not");
 });
 
 const { passed, failed } = summary();

@@ -62,20 +62,111 @@ export function findUnexpectedAdvisories(report, acceptedAdvisories) {
   return unexpected;
 }
 
-function runNpmAudit(cwd) {
+export function parseNpmAuditReport(text) {
+  let report;
   try {
-    const output = execFileSync(
+    report = JSON.parse(String(text));
+  } catch {
+    throw new Error(
+      "npm audit returned unreadable JSON; no security verdict available.",
+    );
+  }
+  if (report?.error) {
+    const code = report.error.code;
+    const label =
+      typeof code === "string" && /^[A-Z0-9_-]{1,32}$/.test(code)
+        ? ` (${code})`
+        : "";
+    throw new Error(
+      `npm audit registry error${label}; no security verdict available.`,
+    );
+  }
+  const vulnerabilities = report?.vulnerabilities;
+  const total = report?.metadata?.vulnerabilities?.total;
+  if (
+    report?.error ||
+    report?.auditReportVersion !== 2 ||
+    !vulnerabilities ||
+    typeof vulnerabilities !== "object" ||
+    Array.isArray(vulnerabilities) ||
+    !Number.isInteger(total) ||
+    total < 0 ||
+    Object.keys(vulnerabilities).length !== total ||
+    Object.values(vulnerabilities).some(
+      (entry) =>
+        !entry ||
+        !Array.isArray(entry.via) ||
+        entry.via.length === 0 ||
+        entry.via.some((via) =>
+          typeof via === "string"
+            ? !Object.hasOwn(vulnerabilities, via)
+            : !via || typeof via.url !== "string" || via.url.length === 0,
+        ),
+    )
+  ) {
+    throw new Error(
+      "npm audit did not return a complete report; no security verdict available.",
+    );
+  }
+  // Every affected package must trace to an actual advisory source. Pure
+  // reference cycles otherwise look like accepted findings to the allowlist.
+  const sourced = new Set(
+    Object.entries(vulnerabilities)
+      .filter(([, entry]) => entry.via.some((via) => typeof via === "object"))
+      .map(([name]) => name),
+  );
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [name, entry] of Object.entries(vulnerabilities)) {
+      if (
+        !sourced.has(name) &&
+        entry.via.some((via) => typeof via === "string" && sourced.has(via))
+      ) {
+        sourced.add(name);
+        changed = true;
+      }
+    }
+  }
+  if (sourced.size !== total)
+    throw new Error(
+      "npm audit contains findings without advisory sources; no security verdict available.",
+    );
+  return report;
+}
+
+export function runNpmAudit(cwd, execute = execFileSync) {
+  let output;
+  try {
+    output = execute(
       "npm",
       ["audit", "--omit=dev", "--audit-level=high", "--json"],
-      { cwd, encoding: "utf8" },
+      { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
-    return JSON.parse(output);
   } catch (error) {
-    // npm audit exits non-zero when it finds anything at/above --audit-level;
-    // the JSON report is still on stdout and is what we need to inspect.
-    if (error.stdout) return JSON.parse(error.stdout.toString());
-    throw error;
+    // Only npm's normal finding exit may carry an authoritative report.
+    // Timeouts, signals, buffer failures and unknown exits are infrastructure errors.
+    if (
+      error.status !== 1 ||
+      error.signal ||
+      error.killed ||
+      (error.code !== undefined && error.code !== 1) ||
+      !error.stdout
+    ) {
+      throw new Error(
+        "npm audit did not complete normally; no security verdict available.",
+        { cause: error },
+      );
+    }
+    const report = parseNpmAuditReport(error.stdout.toString());
+    if (report.metadata.vulnerabilities.total === 0)
+      throw new Error(
+        "npm audit failed without findings; no security verdict available.",
+        { cause: error },
+      );
+    return report;
   }
+  return parseNpmAuditReport(output);
 }
 
 async function main() {
@@ -96,5 +187,15 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  await main();
+  try {
+    await main();
+  } catch (error) {
+    // Do not dump captured registry responses or process arguments via Error.cause.
+    console.error(
+      error instanceof Error
+        ? error.message
+        : "npm audit failed; no security verdict available.",
+    );
+    process.exitCode = 1;
+  }
 }
