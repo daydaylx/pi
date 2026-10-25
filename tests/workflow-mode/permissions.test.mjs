@@ -3533,6 +3533,30 @@ await test("workspace_add requires UI approval and keeps the root within one ses
 
     const tool = harness.tools.get("workspace_add");
     assert(Boolean(tool), "workspace_add is registered");
+    const filePath = join(additional, "file.txt");
+    writeFileSync(filePath, "fixture\n");
+    let fileRejected = false;
+    try {
+      await tool.execute(
+        "workspace-file",
+        { path: filePath },
+        undefined,
+        undefined,
+        context,
+      );
+    } catch (error) {
+      fileRejected = /kein erreichbares Verzeichnis/.test(String(error));
+    }
+    assert(
+      fileRejected,
+      "a file argument is a parameter error, not user denial",
+    );
+    eq(
+      harness.lifecycleCalls.filter((call) => call.kind === "confirm").length,
+      0,
+      "invalid file input never fabricates a user decision",
+    );
+
     const preflight = await harness.runHooks(
       "tool_call",
       { toolName: "workspace_add", input: { path: additional } },
