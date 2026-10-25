@@ -1,5 +1,5 @@
 /**
- * task-tier — Duplicate-Read-Guard und Turn-Telemetrie
+ * task-tier — reine Read- und Turn-Telemetrie
  * (docs/decisions/039-task-tier-vereinfacht.md).
  *
  * Die frühere FAST/NORMAL/DEEP-Klassifikation (Prompt-Zusatz, automatische
@@ -7,11 +7,9 @@
  * Thinking, Subagenten und Verifier regeln Nutzerwahl und Permission-Schicht.
  * Übrig bleiben zwei beobachtbare Funktionen:
  *
- * - im Projektprofil wird ein `read`, dessen Zeilenbereich bereits von einer
- *   früheren, nicht gekürzten Ausgabe derselben unveränderten Datei
- *   (mtime/Größe) abgedeckt ist, blockiert; in `pis` bleiben Wiederholungen
- *   erlaubt; `edit`/`write` invalidieren, Kompaktierung und Sitzungsstart
- *   setzen zurück;
+ * - wiederholte Reads unveränderter Dateien werden in beiden Profilen nur
+ *   gezählt, niemals blockiert; edit/write invalidieren die Beobachtung,
+ *   Kompaktierung und Sitzungsstart setzen sie zurück;
  * - pro Lauf ein Session-Eintrag `task-tier.turn` mit Aufrufzählern, Tokens
  *   und Cache-Verlusten.
  *
@@ -26,7 +24,6 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { subagentLaunchCount } from "../permissions/temporary-agent-policy.ts";
-import { getPiLaunchProfile } from "../shared/profile.ts";
 import { createReadTracker } from "./read-tracker.ts";
 
 export const TASK_TIER_ENTRY = "task-tier.turn";
@@ -42,7 +39,7 @@ interface TurnState {
   startedAt: number;
   searches: number;
   reads: number;
-  dupReadsBlocked: number;
+  dupReadsObserved: number;
   edits: number;
   editedFiles: Set<string>;
   commands: number;
@@ -63,7 +60,7 @@ function newTurn(): TurnState {
     startedAt: Date.now(),
     searches: 0,
     reads: 0,
-    dupReadsBlocked: 0,
+    dupReadsObserved: 0,
     edits: 0,
     editedFiles: new Set(),
     commands: 0,
@@ -118,38 +115,11 @@ export default function taskTier(pi: ExtensionAPI): void {
     turn = newTurn();
   });
 
-  pi.on("tool_call", (event, ctx: ExtensionContext) => {
-    const name = event.toolName;
-
-    if (name === "subagent") {
-      if (!turn) return;
-      const launches = subagentLaunchCount(event);
-      turn.subagentCalls += launches;
-      if (launches > 0 && isVerifierCall(event.input)) turn.verifierCalls += 1;
-      return;
-    }
-
-    if (name !== "read") return;
-    const path = inputPath(event.input);
-    if (!path) return;
-    const absolute = resolve(ctx.cwd, path);
-    const stamp = stampOf(absolute);
-    const input = event.input as { offset?: number; limit?: number };
-    if (
-      getPiLaunchProfile() !== "system" &&
-      stamp &&
-      tracker.isRedundant(
-        absolute,
-        { offset: input.offset, limit: input.limit },
-        stamp,
-      )
-    ) {
-      if (turn) turn.dupReadsBlocked += 1;
-      return {
-        block: true,
-        reason: `Datei unverändert und dieser Bereich wurde bereits gelesen (${path}); der Inhalt steht im Kontext. Nicht erneut lesen.`,
-      };
-    }
+  pi.on("tool_call", (event) => {
+    if (event.toolName !== "subagent" || !turn) return;
+    const launches = subagentLaunchCount(event);
+    turn.subagentCalls += launches;
+    if (launches > 0 && isVerifierCall(event.input)) turn.verifierCalls += 1;
   });
 
   pi.on("tool_result", (event, ctx: ExtensionContext) => {
@@ -176,13 +146,16 @@ export default function taskTier(pi: ExtensionAPI): void {
       const truncated = Boolean(
         (details?.truncation as { truncated?: boolean } | undefined)?.truncated,
       );
-      if (stamp)
+      if (stamp) {
+        if (turn && tracker.isRedundant(absolute, input, stamp))
+          turn.dupReadsObserved += 1;
         tracker.record(
           absolute,
           { offset: input.offset, limit: input.limit },
           stamp,
           truncated,
         );
+      }
     }
   });
 
@@ -221,11 +194,11 @@ export default function taskTier(pi: ExtensionAPI): void {
     if (!state) return;
     turn = undefined;
     pi.appendEntry(TASK_TIER_ENTRY, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       timestamp: new Date().toISOString(),
       searches: state.searches,
       reads: state.reads,
-      dupReadsBlocked: state.dupReadsBlocked,
+      dupReadsObserved: state.dupReadsObserved,
       edits: state.edits,
       editedFiles: state.editedFiles.size,
       commands: state.commands,

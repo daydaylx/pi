@@ -67,83 +67,73 @@ const tr = (toolName, input, extra = {}) => ({
 const turnEntry = (harness) =>
   harness.appended.find((e) => e.customType === "task-tier.turn");
 
-await test("task-tier: Duplicate-Read wird blockiert, Edit und Änderung geben frei", async () => {
-  await withHarness(
-    { extensions: [tier], files: { "a.txt": "x\n" } },
-    async ({ harness, context, cwd }) => {
-      await harness.runHooks("agent_start", {}, context);
-      const read = { path: "a.txt" };
-      eq(
-        (await harness.runHooks("tool_call", tc("read", read), context))[0],
-        undefined,
-        "erster Read frei",
+for (const profile of ["project", "system"]) {
+  await test(`task-tier: ${profile} erlaubt wiederholte Reads und beobachtet sie nur`, async () => {
+    const previous = process.env.PI_LAUNCH_PROFILE;
+    process.env.PI_LAUNCH_PROFILE = profile;
+    try {
+      await withHarness(
+        { extensions: [tier], files: { "a.txt": "x\n" } },
+        async ({ harness, context, cwd }) => {
+          await harness.runHooks("agent_start", {}, context);
+          const read = { path: "a.txt" };
+          const performRead = async (input = read, extra = {}) => {
+            const results = await harness.runHooks(
+              "tool_call",
+              tc("read", input),
+              context,
+            );
+            assert(
+              !results.some((result) => result?.block),
+              "Read bleibt frei",
+            );
+            await harness.runHooks(
+              "tool_result",
+              tr("read", input, extra),
+              context,
+            );
+          };
+          await performRead();
+          await performRead();
+          await performRead({ path: "a.txt", offset: 1, limit: 1 });
+          await harness.runHooks("tool_result", tr("edit", read), context);
+          await performRead();
+          writeFileSync(join(cwd, "a.txt"), "yy\n");
+          await performRead();
+          await harness.runHooks("session_compact", {}, context);
+          await performRead(read, { isError: true });
+          await performRead(read, {
+            details: { truncation: { truncated: true } },
+          });
+          await performRead();
+          await harness.runHooks("agent_end", { messages: [] }, context);
+          const entry = turnEntry(harness).data;
+          eq(
+            entry.dupReadsObserved,
+            2,
+            "nur erfolgreich zuvor gelesene Bereiche zählen",
+          );
+          assert(!("dupReadsBlocked" in entry), "kein Blockzähler");
+          eq(entry.reads, 8, "alle Read-Ergebnisse bleiben in der Telemetrie");
+          await harness.runHooks("session_start", {}, context);
+          await harness.runHooks("agent_start", {}, context);
+          await performRead();
+          await harness.runHooks("agent_end", { messages: [] }, context);
+          eq(
+            harness.appended
+              .filter((e) => e.customType === "task-tier.turn")
+              .at(-1).data.dupReadsObserved,
+            0,
+            "neue Sitzung setzt Beobachtung zurück",
+          );
+        },
       );
-      await harness.runHooks("tool_result", tr("read", read), context);
-      const [dup] = await harness.runHooks(
-        "tool_call",
-        tc("read", read),
-        context,
-      );
-      assert(dup?.block === true, "Duplicate-Read geblockt");
-      await harness.runHooks("tool_result", tr("edit", read), context);
-      eq(
-        (await harness.runHooks("tool_call", tc("read", read), context))[0],
-        undefined,
-        "nach Edit wieder frei",
-      );
-      await harness.runHooks("tool_result", tr("read", read), context);
-      writeFileSync(join(cwd, "a.txt"), "yy\n");
-      eq(
-        (await harness.runHooks("tool_call", tc("read", read), context))[0],
-        undefined,
-        "nach externer Änderung wieder frei",
-      );
-      await harness.runHooks("tool_result", tr("read", read), context);
-      await harness.runHooks("session_compact", {}, context);
-      eq(
-        (await harness.runHooks("tool_call", tc("read", read), context))[0],
-        undefined,
-        "nach Kompaktierung wieder frei",
-      );
-      await harness.runHooks("agent_end", { messages: [] }, context);
-      eq(turnEntry(harness).data.dupReadsBlocked, 1, "Telemetrie Duplicate-Reads");
-    },
-  );
-});
-
-await test("task-tier: Systemprofil blockiert keine wiederholten Reads", async () => {
-  const previous = process.env.PI_LAUNCH_PROFILE;
-  process.env.PI_LAUNCH_PROFILE = "system";
-  try {
-    await withHarness(
-      { extensions: [tier], files: { "a.txt": "x\n" } },
-      async ({ harness, context }) => {
-        await harness.runHooks("agent_start", {}, context);
-        const read = { path: "a.txt" };
-        await harness.runHooks("tool_call", tc("read", read), context);
-        await harness.runHooks("tool_result", tr("read", read), context);
-        const duplicate = await harness.runHooks(
-          "tool_call",
-          tc("read", read),
-          context,
-        );
-        assert(
-          !duplicate.some((entry) => entry?.block),
-          "a second read remains available in the System profile",
-        );
-        await harness.runHooks("agent_end", { messages: [] }, context);
-        eq(
-          turnEntry(harness).data.dupReadsBlocked,
-          0,
-          "unblocked reads are not counted as blocked telemetry",
-        );
-      },
-    );
-  } finally {
-    if (previous === undefined) delete process.env.PI_LAUNCH_PROFILE;
-    else process.env.PI_LAUNCH_PROFILE = previous;
-  }
-});
+    } finally {
+      if (previous === undefined) delete process.env.PI_LAUNCH_PROFILE;
+      else process.env.PI_LAUNCH_PROFILE = previous;
+    }
+  });
+}
 
 await test("task-tier: ändert weder Prompt, Thinking noch Subagenten", async () => {
   await withHarness({ extensions: [tier] }, async ({ harness, context }) => {
@@ -208,7 +198,7 @@ await test("task-tier: Telemetrie zählt Aufrufe, Requests, Tokens und Cache-Ver
     await end({ role: "assistant", usage: usage(13000, 0, 60) });
     await harness.runHooks("agent_end", { messages: [] }, context);
     const entry = turnEntry(harness).data;
-    eq(entry.schemaVersion, 2, "Schema");
+    eq(entry.schemaVersion, 3, "Schema");
     eq(entry.searches, 1, "Suchen");
     eq(entry.edits, 1, "Edits");
     eq(entry.editedFiles, 1, "geänderte Dateien");
