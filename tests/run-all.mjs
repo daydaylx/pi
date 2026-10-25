@@ -35,6 +35,7 @@ const suites = [
     env: {},
   },
   { name: "task-tier", file: "task-tier.test.mjs", env: {} },
+  { name: "autonomy-evidence", file: "autonomy-evidence.test.mjs", env: {} },
   {
     name: "dependency-discovery",
     file: "dependency-discovery.test.mjs",
