@@ -142,3 +142,16 @@ test("bundle probe refuses to import a symlinked chunk", () =>
     );
     assert.throws(() => probeBundledRuntime(directory), /Symlink/);
   }));
+
+test("declared dependencies are recognized through a worktree node_modules symlink", () =>
+  fixture((directory) => {
+    const input = path.relative(
+      directory,
+      path.join(root, "npm/node_modules/undici/index.js"),
+    );
+    const report = bundleInputEvidence(
+      [{ inputs: { [input]: {} } }],
+      directory,
+    );
+    assert.equal(report.securityDependencies.undici, "8.12.2");
+  }));

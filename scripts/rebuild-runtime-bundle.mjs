@@ -94,6 +94,7 @@ export function bundleInputEvidence(
   output,
   expected = INPUTS.lockedSecurityDependencies,
 ) {
+  const dependencyRoot = realpathSync(path.join(NPM, "node_modules"));
   const inputs = {},
     securityDependencies = {};
   for (const file of new Set(
@@ -108,7 +109,7 @@ export function bundleInputEvidence(
     const absolute = realpathSync(path.resolve(output, file));
     if (
       !absolute.startsWith(output + path.sep) &&
-      !absolute.startsWith(path.join(NPM, "node_modules") + path.sep)
+      !absolute.startsWith(dependencyRoot + path.sep)
     )
       throw new Error(`Input outside declared build roots: ${file}`);
     inputs[file] = digest(readFileSync(absolute));
