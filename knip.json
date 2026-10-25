@@ -40,7 +40,8 @@
     "@earendil-works/pi-tui",
     "typebox",
     "jiti",
-    "node-pty"
+    "node-pty",
+    "esbuild"
   ],
   "rules": {
     "exports": "off",

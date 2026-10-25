@@ -23,6 +23,7 @@ jobs:
           - deadcode
           - test:coverage
           - test:patches
+          - build:runtime-security
           - test:frontend-contracts
           - audit:check
           - test:benchmark

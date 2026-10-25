@@ -69,6 +69,11 @@ const suites = [
   { name: "check-npm-audit", file: "check-npm-audit.test.mjs", env: {} },
   { name: "release-state", file: "release-state.test.mjs", env: {} },
   {
+    name: "runtime-bundle-build",
+    file: "runtime-bundle-build.test.mjs",
+    env: {},
+  },
+  {
     name: "check-theme-contrast",
     file: "check-theme-contrast.test.mjs",
     env: {},

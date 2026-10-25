@@ -19,6 +19,8 @@
     "test:coverage:baseline": "node ../tests/coverage.mjs --write-baseline",
     "test:runtime": "node ../tests/p1-runtime.mjs",
     "test:patches": "node ../tests/runtime-patches.mjs",
+    "test:runtime-build": "node --test ../tests/runtime-bundle-build.test.mjs",
+    "build:runtime-security": "node ../scripts/rebuild-runtime-bundle.mjs",
     "patch:runtime": "node ../scripts/apply-runtime-patches.mjs",
     "audit:check": "node ../scripts/check-npm-audit.mjs",
     "format": "prettier --write ..",
@@ -27,7 +29,7 @@
     "deadcode": "knip --directory ..",
     "typecheck": "tsc --noEmit -p ../tsconfig.json",
     "check:versioned-tree": "node ../scripts/check-versioned-tree.mjs",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run test:frontend-contracts && npm run audit:check"
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run deadcode && npm run test:coverage && npm run test:patches && npm run build:runtime-security && npm run test:frontend-contracts && npm run audit:check"
   },
   "dependencies": {
     "@ujjwalgrover/pi-catppuccin": "1.0.0",
