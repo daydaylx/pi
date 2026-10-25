@@ -4,8 +4,10 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -72,6 +74,85 @@ test("system goal verification is profile-local and accepts only bounded typed p
   } finally {
     if (previous === undefined) delete process.env.PI_LAUNCH_PROFILE;
     else process.env.PI_LAUNCH_PROFILE = previous;
+  }
+});
+
+test("system verification reads the file goal independently and rejects unsafe readback", async () => {
+  const previous = process.env.PI_LAUNCH_PROFILE;
+  const temp = mkdtempSync(path.join(tmpdir(), "pi-goal-readback-"));
+  try {
+    process.env.PI_LAUNCH_PROFILE = "system";
+    const tools = new Map();
+    extension.default({ registerTool: (tool) => tools.set(tool.name, tool) });
+    const verify = tools.get("system_file_verify");
+    const filePath = path.join(temp, "goal.txt");
+    const expectedSha256 = createHash("sha256").update("fixed\n").digest("hex");
+    const invoke = () =>
+      verify.execute("readback", { filePath, expectedSha256 });
+    writeFileSync(filePath, "broken\n");
+    const before = await invoke();
+    assert.equal(before.isError, true);
+    assert.equal(before.details.goalCheck.passed, false);
+    writeFileSync(filePath, "fixed\n");
+    const after = await invoke();
+    assert.equal(after.isError, false);
+    assert.equal(after.details.goalCheck.actualSha256, expectedSha256);
+    const link = path.join(temp, "link.txt");
+    symlinkSync(filePath, link);
+    await assert.rejects(
+      verify.execute("symlink", { filePath: link, expectedSha256 }),
+    );
+    await assert.rejects(
+      verify.execute("directory", { filePath: temp, expectedSha256 }),
+    );
+    await assert.rejects(
+      verify.execute("missing", {
+        filePath: path.join(temp, "missing"),
+        expectedSha256,
+      }),
+    );
+    // Invalid goals fail before any system command can run.
+    await assert.rejects(
+      tools.get("system_state_verify").execute("invalid", {
+        kind: "user-service",
+        unit: "--invalid",
+        operation: "restart",
+      }),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.PI_LAUNCH_PROFILE;
+    else process.env.PI_LAUNCH_PROFILE = previous;
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("real process adapter reports an unavailable unit and writes an error audit", async () => {
+  const previous = process.env.PI_SYSTEM_AUDIT_DIR;
+  const temp = mkdtempSync(path.join(tmpdir(), "pi-real-process-"));
+  process.env.PI_SYSTEM_AUDIT_DIR = temp;
+  try {
+    const tools = new Map();
+    extension.registerSystemControl(
+      { registerTool: (tool) => tools.set(tool.name, tool) },
+      { profile: () => "system" },
+    );
+    const result = await tools.get("system_unit_status").execute(
+      "missing-unit",
+      {
+        unit: "pi-regression-nonexistent-5d09ae63.service",
+      },
+      undefined,
+      () => {},
+      {},
+    );
+    assert.equal(result.isError, true);
+    assert.equal(result.details.outcome, "error");
+    assert.equal(result.details.auditError, undefined);
+    assert.ok(result.content[0].text.length > 0);
+  } finally {
+    if (previous === undefined) delete process.env.PI_SYSTEM_AUDIT_DIR;
+    else process.env.PI_SYSTEM_AUDIT_DIR = previous;
+    rmSync(temp, { recursive: true, force: true });
   }
 });
 
