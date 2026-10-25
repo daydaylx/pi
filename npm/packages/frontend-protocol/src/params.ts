@@ -162,7 +162,10 @@ export const REQUEST_PARAM_SCHEMAS = {
         Type.Object(
           {
             available: Type.Boolean(),
-            strategy: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
+            strategy: Type.Union([
+              Type.String({ maxLength: 200 }),
+              Type.Null(),
+            ]),
             ref: Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
             status: Type.String({ maxLength: 200 }),
           },
@@ -203,7 +206,10 @@ export const REQUEST_PARAM_SCHEMAS = {
         Type.Object(
           {
             available: Type.Boolean(),
-            strategy: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
+            strategy: Type.Union([
+              Type.String({ maxLength: 200 }),
+              Type.Null(),
+            ]),
             ref: Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
             status: Type.String({ maxLength: 200 }),
           },

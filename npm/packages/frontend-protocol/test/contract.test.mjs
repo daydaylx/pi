@@ -553,10 +553,7 @@ test("exposes runs capability and validates run.* methods, results and events", 
     }),
     false,
   );
-  assert.equal(
-    isValidRequestParams("run.get", { runId: "run_123" }),
-    true,
-  );
+  assert.equal(isValidRequestParams("run.get", { runId: "run_123" }), true);
   assert.equal(
     isValidRequestParams("run.get", { clientSubmissionId: "sub-123" }),
     true,
@@ -614,10 +611,7 @@ test("exposes runs capability and validates run.* methods, results and events", 
     true,
   );
   assert.equal(isValidRequestResult("run.current", { run: null }), true);
-  assert.equal(
-    isValidEventData("run.created", { run: sampleSnapshot }),
-    true,
-  );
+  assert.equal(isValidEventData("run.created", { run: sampleSnapshot }), true);
   assert.equal(
     isValidEventData("run.input_required", {
       run: sampleSnapshot,
