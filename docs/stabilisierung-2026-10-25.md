@@ -228,3 +228,13 @@ Maßnahmen. Unveränderte Statusentscheidungen stammen aus dem Auftragsindex.
 Rückweg: eigene Änderungen sind thematisch getrennte lokale Commits und können
 gezielt durch neue Revert-Commits zurückgenommen werden. Kein History-Rewrite,
 keine fremden Änderungen im Rückweg und kein produktiver Rollout erfolgt.
+
+## Fortschreibung: kompatibler Sicherheitsneubau
+
+Die Anschlussarbeit nach dem ursprünglichen Bericht liefert einen geprüften
+Neubau von Pi 1.3.0 mit eingebettetem Undici 8.12.2. Der beschriebene
+Bundle-Sicherheitsrest ist im vorbereiteten Artefakt behoben; die produktive
+Installation bleibt bis zur ausdrücklichen Aktivierungsfreigabe unverändert.
+Codecommits: `1c0e011`, `35c4785`, `455d865`. Vollständige Verify-Kette auch im
+sauberen Source-Worktree bestanden. Details, tatsächlicher HTTP-Regressionsbeleg,
+Byteidentität und Abnahmegrenzen: [Sicherheitsbuild](runtime-security-build.md).

@@ -1,0 +1,163 @@
+{
+  "date": "2026-10-25",
+  "codeCommit": "455d865",
+  "runtimeVersion": "1.3.0",
+  "esbuildVersion": "0.28.2",
+  "upstreamCommit": "71023aec1546d6d677a65669c5665c0927ce0dd0",
+  "upstreamFiles": {
+    "scripts/build-coding-agent-bundle.mjs": {
+      "url": "https://raw.githubusercontent.com/earendil-works/pi/71023aec1546d6d677a65669c5665c0927ce0dd0/scripts/build-coding-agent-bundle.mjs",
+      "sha256": "bb8134c84faa8b0e7d9f7af9e127b33dc09c79243ecee666e526ff43961f2335"
+    },
+    "packages/ai/src/auth/oauth/load.ts": {
+      "url": "https://raw.githubusercontent.com/earendil-works/pi/71023aec1546d6d677a65669c5665c0927ce0dd0/packages/ai/src/auth/oauth/load.ts",
+      "sha256": "8417cf2dea16b38f94ccb6c21ae1c4e6b4104370093c32b8dfe77747763b3f9c"
+    }
+  },
+  "publishedPackages": {
+    "@earendil-works/pi-agent-core": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-1.3.0.tgz",
+      "integrity": "sha512-2jvpxZs47PFD5mSQb/yK0pGHJ5yO7Nu22u9mFjHbSLRgu62vZ9rupimDSIp4arnqOadyv0AWvYHtCSpFoJV7ag=="
+    },
+    "@earendil-works/pi-ai": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-1.3.0.tgz",
+      "integrity": "sha512-KaBI8x7q7sPoFUXICNGD9efHzDG+oRNwVvkA9jdIsSQWH1RjFssOlEGsbLtewUPPgCrvmz0l2KTgSLXTyj3acw=="
+    },
+    "@earendil-works/pi-codemode": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-codemode/-/pi-codemode-1.3.0.tgz",
+      "integrity": "sha512-2G9tmbsPhgzwfz7cmzJpbLSLqOx3eu22Gbzm+Wc3HqeZMjLQS4F3KfAabozVhv7uEjq3k2O1dZTHmhhWr2xbfQ=="
+    },
+    "@earendil-works/pi-coding-agent": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-1.3.0.tgz",
+      "integrity": "sha512-V/WoCjA2hQSe3QLWIUB24cTRdtEdeLiIzkDqU5RMXV6VWuD+KGZnzVBMhglwdnQTySkehZsjt8a3g6Jd2g4nnw=="
+    },
+    "@earendil-works/pi-mcp": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-mcp/-/pi-mcp-1.3.0.tgz",
+      "integrity": "sha512-lbktLplmdGamM2t460Q0ziNEfpUEHDTVNf79g/AialJ3XZ+SHgNqa/OJXRR+fU+GV/l+gBhRPcyP8XkQlv8Avw=="
+    },
+    "@earendil-works/pi-telemetry": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-telemetry/-/pi-telemetry-1.3.0.tgz",
+      "integrity": "sha512-ERGZr+aXjNJzoUbB7ZzHVH3g5otzMHjHLs2Fyizm12By5X+gBEhod9cJXFOk13S7M8a29Am+Mq21zm73mRJFLg=="
+    },
+    "@earendil-works/pi-tui": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-1.3.0.tgz",
+      "integrity": "sha512-AlKvEwEWyVtnuw7SVb4N/mUhlfIohyFslUNWarZVdLHHSdt3ca5EhMLwTzblBpDpaofSz+f+tAHie6CfxVrWKA=="
+    }
+  },
+  "lockSha256": "5b46502a87df57bcc11e84dd18c9f8a087884eaee9e051549a03458798ad179b",
+  "pipelineSources": {
+    "scripts/rebuild-runtime-bundle.mjs": "47125807cecd54c402efcf12d57cdd618bcb8be1b1a134b9d8cd0e90136dbc6d",
+    "scripts/apply-runtime-patches.mjs": "8e0a6b0065b8f510251414458aeedc958961b7252774c477df1353ec63fe7b81",
+    "scripts/check-bundled-runtime.mjs": "45dd42362688fbfb81ac0774771afa3f9faee6d568195c49e59145e1eaa2a610",
+    "scripts/runtime-build-inputs.json": "24df49fa6c9bd023a96e818da3e71a1c42362b3e8eccca9cffa54a272261d765",
+    "tests/p1-runtime.mjs": "544106e0213bf533057b18ccdab64c5625216e6e6db1466e7a76cdee09906054"
+  },
+  "bundleArtifactSha256": "22ffc42c7815a23b772da1935b3abf4230f01fa177e53c3f7ce80b16345b7e8c",
+  "artifactScope": "80 bundle outputs and launcher, excluding unbundled resources and external/native dependencies.",
+  "capturedBuildInputs": 3360,
+  "bundleOutputs": 80,
+  "repeatedBuilds": {
+    "identicalBundleOutputs": true,
+    "count": 3,
+    "scope": "Same machine and dependency tree, fresh output directories at the same depth."
+  },
+  "securityDependencies": {
+    "undici": "8.12.2"
+  },
+  "lockedZod": {
+    "version": "4.6.7",
+    "observedInBundleMetafiles": false
+  },
+  "baselineSri": {
+    "passed": false,
+    "probes": [
+      {
+        "name": "lowercase-mismatch",
+        "accepted": false,
+        "shouldAccept": false,
+        "passed": true
+      },
+      {
+        "name": "uppercase-mismatch",
+        "accepted": true,
+        "shouldAccept": false,
+        "passed": false
+      },
+      {
+        "name": "uppercase-match",
+        "accepted": true,
+        "shouldAccept": true,
+        "passed": true
+      }
+    ]
+  },
+  "rebuiltSri": {
+    "runtimeVersion": "1.3.0",
+    "originalChunkSha256": "a795870aa7d191a3536bbd0032a7a148f9b5d9531a7268d60502951f4cb4f01a",
+    "probes": [
+      {
+        "name": "lowercase-mismatch",
+        "accepted": false,
+        "shouldAccept": false,
+        "passed": true
+      },
+      {
+        "name": "uppercase-mismatch",
+        "accepted": false,
+        "shouldAccept": false,
+        "passed": true
+      },
+      {
+        "name": "uppercase-match",
+        "accepted": true,
+        "shouldAccept": true,
+        "passed": true
+      }
+    ],
+    "passed": true,
+    "scope": "Embedded Undici SRI case handling; no claim about all possible vulnerabilities"
+  },
+  "checks": {
+    "guardRegressions": 7,
+    "runtimeContract": "passed",
+    "mainVerifyExitCode": 0,
+    "cleanVerifyExitCode": 0,
+    "cleanSourceCommit": "455d865",
+    "localStagedInstall": "436 managed files; p1-runtime, launcher version and frontend protocol build passed"
+  },
+  "agentSmoke": {
+    "runtimeEntry": "dist/bundle/cli.js",
+    "runtimeVersion": "1.3.0",
+    "bundleArtifactSha256": "22ffc42c7815a23b772da1935b3abf4230f01fa177e53c3f7ce80b16345b7e8c",
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "low",
+    "oraclePassed": true,
+    "checkerUnchanged": true,
+    "agentCheckObserved": true,
+    "questions": 0,
+    "toolCalls": 4,
+    "exitCode": 0,
+    "durationMs": 7466,
+    "usage": {
+      "input": 6149,
+      "output": 302,
+      "cacheRead": 16256,
+      "cacheWrite": 0
+    },
+    "passed": true,
+    "limitation": "One synthetic project-mode smoke; not complete installed PIS/GUI acceptance."
+  },
+  "activationStatus": "prepared_not_installed",
+  "limitations": [
+    "Rebuilt from checksum-verified published JavaScript, not TypeScript source.",
+    "External/native dependencies still require the same locked installation.",
+    "Build receipt does not identify already-running processes."
+  ]
+}
