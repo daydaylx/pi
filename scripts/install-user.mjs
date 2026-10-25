@@ -56,6 +56,8 @@ const ALLOWLIST = [
   "shared",
   "skills",
   "tests",
+  // Shipped regression tests import this evaluator; model drivers stay checkout-only.
+  "benchmarks/autonomy/evidence.mjs",
   "themes",
   // tsconfig.json includes types/**/*.d.ts; without it the installed setup's
   // typecheck (and the verify tool) fails on AgentToolResult.

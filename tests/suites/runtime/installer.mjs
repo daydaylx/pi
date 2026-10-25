@@ -16,6 +16,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assert, eq } from "../../shared/assertions.mjs";
 import { ROOT } from "../../shared/jiti-loader.mjs";
+import { checkRelativeImports } from "../../../scripts/check-relative-imports.mjs";
 
 export const installerSections = {
   "installer greenfield deployment": async (context) => {
@@ -158,6 +159,23 @@ export const installerSections = {
             timeout: 30_000,
             env: { ...process.env, HOME: home },
           },
+        );
+
+        // Dependencies are installed separately; only the installer-owned tree
+        // is under test. A shared read-only dependency tree resolves npm imports.
+        symlinkSync(
+          path.join(ROOT, "npm/node_modules"),
+          path.join(target, "npm/node_modules"),
+          "dir",
+        );
+        eq(
+          checkRelativeImports(target),
+          [],
+          "every literal import in the installed setup and its tests resolves",
+        );
+        assert(
+          !existsSync(path.join(target, "benchmarks/autonomy/run.mjs")),
+          "live-model drivers are not installed as runtime resources",
         );
 
         // shared/ must exist and be importable.
