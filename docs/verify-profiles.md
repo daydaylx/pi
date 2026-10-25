@@ -10,8 +10,12 @@ Ein **vertrautes** Projekt kann seine eigenen Prüfungen (Typecheck, Lint, Tests
 Build, projektspezifische Checks) deklarieren – z. B. eine JS-Profil `npm test`,
 eine Python-Profil `pytest`, eine Rust-Profil `cargo test`. Das Tool
 `project_check` führt ausdrücklich angeforderte Profile in ihrer angegebenen
-Reihenfolge aus. Es gibt kein automatisches Abschluss-Gate und keine
-Pflichtprüfung nach Änderungen.
+Reihenfolge aus. Die Runtime startet nach Änderungen keine automatische
+Pflichtprüfung und erzwingt mit diesem Tool kein Abschluss-Gate. Die
+Arbeitsregel aus `AGENTS.md` bleibt davon getrennt: Für Projektänderungen ist
+das deklarierte Pflichtprofil mit `project_check` der kanonische technische
+Nachweis. Ein Prüferfolg belegt weder die fachliche Zielwirkung noch ein
+gegebenenfalls erforderliches unabhängiges Verifier-Urteil.
 
 ## Abgrenzung zur Setup-Verifikation (wichtig)
 
@@ -23,6 +27,23 @@ lockern keine globalen Grenzen. Das `verify`-Tool prüft ausschließlich
 `~/.pi/agent` und verweigert den Lauf, wenn das Arbeitsverzeichnis außerhalb des
 Agent-Verzeichnisses liegt; Projektänderungen werden nur mit
 `project_check({ profile: "verify" })` verifiziert.
+
+## Nebenwirkungen und lesende Aufträge
+
+`project_check` ist kein rein lesendes Werkzeug. Nach erfolgreicher Trust- und
+Profilprüfung bereitet es vorhandene npm-Paketwurzeln vor: Fehlt
+`node_modules`, kann es anhand des bestehenden `package-lock.json` `npm ci`
+ausführen, einschließlich der dort vorgesehenen Installationsskripte. Auch die
+Prüfprofile selbst können Buildartefakte schreiben. Fehlende Lockfiles,
+Installationsfehler und Abbrüche verhindern den anschließenden Profillauf;
+das Ergebnis enthält `dependencyPreparation`.
+
+Ein rein lesender Analyseauftrag braucht keinen solchen Lauf als bloßes
+Abschlussritual. Vor einem ausdrücklich angeforderten Check müssen dessen
+Schreibwirkungen und erforderliche Installationen vom Auftrag und den aktiven
+Berechtigungen gedeckt sein. Das Tool erteilt dafür keine zusätzliche Freigabe.
+Fehlt ein Prüfprofil, benenne die fehlende Konfiguration und gegebenenfalls
+eine erlaubte direkte Prüfung; ohne Ledgernachweis entsteht kein `verified`.
 
 ## Trust-Gate
 
