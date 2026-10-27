@@ -24,6 +24,8 @@ export function verificationDisplayLabel(normalized: string): string {
       return "verifiziert";
     case "checks_failed":
       return "Prüfung fehlgeschlagen";
+    case "checks_unavailable":
+      return "Prüfung nicht verfügbar";
     case "unchanged":
       return "unverändert";
     default:

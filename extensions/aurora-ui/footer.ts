@@ -157,6 +157,9 @@ function verificationTone(state: string): Tone {
   if (state === "verified") return "success";
   if (state === "unchanged") return "muted";
   if (state === "checks_failed") return "error";
+  // `checks_unavailable` is a missing verdict, not a failing check: it stays
+  // visible (fail-closed) but reads as subdued instead of warning-red.
+  if (state === "checks_unavailable") return "muted";
   return "warning";
 }
 
