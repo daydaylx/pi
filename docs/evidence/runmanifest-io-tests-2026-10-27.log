@@ -1,0 +1,112 @@
+TAP version 13
+# Subtest: queued run starts after the prompt reservation grace period
+ok 1 - queued run starts after the prompt reservation grace period
+  ---
+  duration_ms: 45.954139
+  type: 'test'
+  ...
+# Subtest: one Pi runtime is shared, prompts are serialized, and reconnect gets a snapshot
+ok 2 - one Pi runtime is shared, prompts are serialized, and reconnect gets a snapshot
+  ---
+  duration_ms: 4871.190601
+  type: 'test'
+  ...
+# Subtest: uncertain prompt timeout blocks retries until session.current verifies idle
+ok 3 - uncertain prompt timeout blocks retries until session.current verifies idle
+  ---
+  duration_ms: 3453.200318
+  type: 'test'
+  ...
+# Subtest: host refuses symlinked runtime and Pi agent directories
+ok 4 - host refuses symlinked runtime and Pi agent directories
+  ---
+  duration_ms: 3.325271
+  type: 'test'
+  ...
+# Subtest: discards an oversized backend frame and keeps serving requests
+ok 5 - discards an oversized backend frame and keeps serving requests
+  ---
+  duration_ms: 161.696236
+  type: 'test'
+  ...
+# Subtest: host stamps epochs and resolves approval envelopes exactly once
+ok 6 - host stamps epochs and resolves approval envelopes exactly once
+  ---
+  duration_ms: 15209.072966
+  type: 'test'
+  ...
+# Subtest: host rejects session management mutations with SESSION_BUSY while turn is active
+ok 7 - host rejects session management mutations with SESSION_BUSY while turn is active
+  ---
+  duration_ms: 2399.422908
+  type: 'test'
+  ...
+# Subtest: filterBackendEnv enforces allowlist, blocklist and validated passthrough
+ok 8 - filterBackendEnv enforces allowlist, blocklist and validated passthrough
+  ---
+  duration_ms: 0.842178
+  type: 'test'
+  ...
+# Subtest: host passes only allowed environment variables and validated passthrough to backend
+ok 9 - host passes only allowed environment variables and validated passthrough to backend
+  ---
+  duration_ms: 101.078073
+  type: 'test'
+  ...
+# Subtest: host times out slow backend requests with REQUEST_TIMEOUT, keeps serving, and ignores late response
+ok 10 - host times out slow backend requests with REQUEST_TIMEOUT, keeps serving, and ignores late response
+  ---
+  duration_ms: 1906.02162
+  type: 'test'
+  ...
+# Subtest: stop with open dialog resolves extension-ui with cancelled outcome
+ok 11 - stop with open dialog resolves extension-ui with cancelled outcome
+  ---
+  duration_ms: 143.287779
+  type: 'test'
+  ...
+# Subtest: late prompt replies preserve the next reservation and unreadable ack stays uncertain
+ok 12 - late prompt replies preserve the next reservation and unreadable ack stays uncertain
+  ---
+  duration_ms: 33.638213
+  type: 'test'
+  ...
+# Subtest: RunStore persists atomic manifests, isolates corrupt files, and enforces crash/reconcile rules
+ok 13 - RunStore persists atomic manifests, isolates corrupt files, and enforces crash/reconcile rules
+  ---
+  duration_ms: 95.419164
+  type: 'test'
+  ...
+# Subtest: PiSystemHost end-to-end P2 lifecycle: multi-client, disconnect/events, queue, cancel, tool failure, verification gate, and restart recovery
+ok 14 - PiSystemHost end-to-end P2 lifecycle: multi-client, disconnect/events, queue, cancel, tool failure, verification gate, and restart recovery
+  ---
+  duration_ms: 8800.634488
+  type: 'test'
+  ...
+# Subtest: failed attempts resolve only with identical reads or host-proved file repairs
+ok 15 - failed attempts resolve only with identical reads or host-proved file repairs
+  ---
+  duration_ms: 263.015409
+  type: 'test'
+  ...
+# Subtest: runtime adapter and host preserve default-read repair identity without guessing ranges
+ok 16 - runtime adapter and host preserve default-read repair identity without guessing ranges
+  ---
+  duration_ms: 34.143271
+  type: 'test'
+  ...
+# Subtest: run authority survives delayed start, lost ack, reconnect and restart without flag repairs
+ok 17 - run authority survives delayed start, lost ack, reconnect and restart without flag repairs
+  ---
+  duration_ms: 6332.969007
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 29278.110056

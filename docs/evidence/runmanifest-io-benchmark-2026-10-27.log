@@ -1,0 +1,17 @@
+history 10 actions: 10825 bytes
+history 50 actions: 46419 bytes
+history 100 actions: 87705 bytes
+history 200 actions: 126982 bytes
+submit: manifest=978B write=978B fsyncs=2 fsync=2.056ms total=5.810ms
+tool.start: manifest=1551B write=1551B fsyncs=2 fsync=2.397ms total=3.745ms
+tool.finish: manifest=1896B write=1896B fsyncs=2 fsync=2.206ms total=3.100ms
+tool.start @10: manifest=11367B write=11367B fsyncs=2 fsync=1.949ms total=2.522ms
+tool.finish @10: manifest=11712B write=11712B fsyncs=2 fsync=1.702ms total=3.432ms
+tool.start @50: manifest=46941B write=46941B fsyncs=2 fsync=2.203ms total=2.808ms
+tool.finish @50: manifest=47254B write=47254B fsyncs=2 fsync=2.461ms total=3.142ms
+tool.start @100: manifest=88005B write=88005B fsyncs=2 fsync=2.229ms total=3.084ms
+tool.finish @100: manifest=88092B write=88092B fsyncs=2 fsync=2.823ms total=3.484ms
+tool.start @200: manifest=127280B write=127280B fsyncs=2 fsync=2.282ms total=3.158ms
+tool.finish @200: manifest=127365B write=127365B fsyncs=2 fsync=2.262ms total=3.036ms
+finalize: manifest=127439B write=127439B fsyncs=2 fsync=2.649ms total=4.283ms
+100 tool.start persist fsync-pair: median=2.215ms p95=3.526ms max=8.470ms
