@@ -60,6 +60,27 @@ await test("findUnexpectedAdvisories reports nothing when every advisory is acce
   );
 });
 
+await test("patched undici and zod advisories remain unexpected on regression", () => {
+  const urls = [
+    "https://github.com/advisories/GHSA-4qv8-2p9j-2685",
+    "https://github.com/advisories/GHSA-f72v-6w45-q472",
+    "https://github.com/advisories/GHSA-xjj6-f33q-929c",
+    "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
+  ];
+  const report = {
+    vulnerabilities: {
+      regression: {
+        name: "regression",
+        via: urls.map((url) => ({ url, title: "regression" })),
+      },
+    },
+  };
+  strictAssert.equal(
+    findUnexpectedAdvisories(report, ACCEPTED_ADVISORIES).length,
+    urls.length,
+  );
+});
+
 await test("npm registry errors cannot be reported as a clean audit", () => {
   const response = JSON.stringify({
     error: { code: "E400", summary: "Bad Request" },

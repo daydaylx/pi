@@ -46,6 +46,8 @@ export const ACCEPTED_ADVISORIES = new Set([
   "https://github.com/advisories/GHSA-rfgv-xxqx-mfg5",
   "https://github.com/advisories/GHSA-3xpg-4rpp-hhhm",
   "https://github.com/advisories/GHSA-2jfj-6hjv-fm6j",
+  // The 2026-10 undici and zod findings are intentionally not allowlisted:
+  // the current lockfile uses patched versions; regressions must fail the gate.
 ]);
 
 /** Pure so it can be unit tested without shelling out to npm. */
