@@ -1,3 +1,6 @@
+import { Buffer } from "node:buffer";
+import process from "node:process";
+import { URL } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

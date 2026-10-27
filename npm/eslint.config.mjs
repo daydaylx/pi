@@ -16,6 +16,9 @@ export default [
       "docs/archive/",
       ".agent/",
       "benchmarks/tasks/*/fixture/",
+      // Historische Benchmark-Daten (Rohdaten); hier dominieren Datensammlungen
+      // statt laufender Quellcode, daher gilt Lint nicht.
+      "benchmark-rohdaten/",
       "coverage/",
       // typescript-eslint verweigert den Start gegen die hier gepinnte
       // typescript@7.0.2 (siehe https://github.com/typescript-eslint/typescript-eslint/issues/10940).
