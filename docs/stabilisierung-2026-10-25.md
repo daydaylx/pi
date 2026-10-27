@@ -238,3 +238,13 @@ Installation bleibt bis zur ausdrücklichen Aktivierungsfreigabe unverändert.
 Codecommits: `1c0e011`, `35c4785`, `455d865`. Vollständige Verify-Kette auch im
 sauberen Source-Worktree bestanden. Details, tatsächlicher HTTP-Regressionsbeleg,
 Byteidentität und Abnahmegrenzen: [Sicherheitsbuild](runtime-security-build.md).
+
+## Fortschreibung: genehmigte Pi-Aktivierung
+
+Der geprüfte Stand `2f2d6a4` ist nach ausdrücklicher Nutzerfreigabe installiert.
+Host, Adapter und Pi-Runtime laufen als neue Prozesskette; Bundlehashes, SRI,
+Runtime-Vertrag, Handshake und vollständiger installierter Profil-Smoke bestehen.
+Einstellungen, Auth-Daten und Sessions sind erhalten; NixOS/GUI/Push blieben
+außerhalb des Eingriffs. Die vorstehenden offenen Installationsangaben sind
+historisch. Aktueller Beleg, Rollbackort und verbleibende Grenzen:
+[Pi-Aktivierung](runtime-activation-2026-10-25.md).

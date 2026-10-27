@@ -125,3 +125,11 @@ Push sind Bestandteil dieser geplanten Aktivierung.
 Die konkreten lokalen Belege und der Plan liegen unter
 `.agent/runtime-security-2026-10-25/`; produktive Dateien und Prozesse sind noch
 unverändert.
+
+## Nachfolgende ausdrücklich genehmigte Aktivierung
+
+Der vorbereitete Stand wurde anschließend mit gesichertem Rückweg nach
+`~/.pi/agent` übernommen. Der Host wurde nur nach erneut bestätigtem Leerlauf
+ersetzt und sein neuer Prozess unabhängig geprüft. Der vorangehende Abschnitt
+beschreibt den damaligen Vorbereitungsstand. Aktueller Nachweis und
+Installationskorrektur `2f2d6a4`: [Aktivierung](runtime-activation-2026-10-25.md).
