@@ -98,6 +98,16 @@ Fenstertitel, IP-Adressen oder Prozesslisten. QuickPanel-/Android-Sitzungen
 sind noch nicht integriert oder live abgenommen. Hermes bleibt bis zum
 Abschluss aller Paritäts- und Rollback-Gates erhalten.
 
+Desktopaufgaben bevorzugen spezialisierte Werkzeuge. Fehlt eine Funktion,
+prüft `pis` andere bereits zugelassene Wege einschließlich `bash` unter
+Benutzerrechten. Der Agent ermittelt Startmechanismus und Prozessidentität,
+unterscheidet bei einem beauftragten Neustart GUI, Dienste und Sitzungen und
+prüft den tatsächlichen Endzustand. Ein laufender Auftrag darf durch einen
+GUI-Neustart nicht verloren gehen. Tatsächliche Ablehnungen und OS-Rechte
+bleiben verbindlich. Die `execFile`-Architektur ohne Shell-Fallback innerhalb
+der System-Control-Adapter (ADR 034) bleibt davon unberührt; das Projektprofil
+behält seine bestehenden Berechtigungen.
+
 ## Arbeitsvertrag und Diagnose
 
 `--no-context-files` bleibt aktiv: Die Runtime lädt damit weder globale noch

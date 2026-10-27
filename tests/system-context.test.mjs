@@ -335,6 +335,15 @@ test("system skills are native SKILL.md files with routing descriptions", () => 
     readFileSync(path.join(root, "nixos-system", "SKILL.md"), "utf8"),
     /Offline-Evaluation/,
   );
+  const desktop = readFileSync(
+    path.join(root, "hyprland-desktop", "SKILL.md"),
+    "utf8",
+  );
+  assert.match(desktop, /Systemprofil[^\n]*`bash`/);
+  assert.match(desktop, /Projektprofil[^\n]*Grenzen/);
+  assert.match(desktop, /GUI-Prozess eindeutig/);
+  assert.match(desktop, /tatsächlich erreichten/);
+  assert.doesNotMatch(desktop, /keinen generischen Shell/);
   assert.equal(collector.systemSkillContext, undefined);
 });
 
@@ -465,6 +474,21 @@ async function main() {
     );
     return { result, collected };
   };
+  test("desktop fallback guidance is restricted to the system work contract", () => {
+    const system = runPrompt("system", "Starte eine Anwendung").result
+      .systemPrompt;
+    assert.match(
+      system,
+      /Spezialfunktion ist keine allgemeine Berechtigungssperre/,
+    );
+    assert.match(system, /einschließlich bash/);
+    const project = runPrompt("project", "Hyprland Fenster").result
+      .systemPrompt;
+    assert.doesNotMatch(
+      project,
+      /Spezialfunktion ist keine allgemeine Berechtigungssperre/,
+    );
+  });
   test("project profile adds no system context to ordinary coding prompts", () => {
     for (const prompt of [
       "Untersuche mein Lager-Projekt auf Fehler",
