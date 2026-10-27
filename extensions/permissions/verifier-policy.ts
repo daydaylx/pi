@@ -80,6 +80,11 @@ function budgetOverrideErrors(
       `timeoutMs ist für ${agentLabel}-Delegationen verboten; maßgeblich ist ausschließlich das Profil-Timeout aus ${docSource}.`,
     );
   }
+  if (input.maxRuntimeMs !== undefined) {
+    errors.push(
+      `maxRuntimeMs ist für ${agentLabel}-Delegationen verboten; maßgeblich ist ausschließlich das Profil-Timeout aus ${docSource}.`,
+    );
+  }
   return errors;
 }
 

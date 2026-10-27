@@ -45,7 +45,10 @@ await test("legacy pis risk classifier still identifies destructive commands", (
     "nixos-rebuild switch",
   ];
   for (const command of risky) {
-    assert(openPolicy.systemOpenBashRisk(command), `classified as risky: ${command}`);
+    assert(
+      openPolicy.systemOpenBashRisk(command),
+      `classified as risky: ${command}`,
+    );
   }
   const open = [
     "ls -la /etc",
@@ -411,13 +414,12 @@ await test("pis does not block or confirm destructive project_check profiles", a
           profile,
           workspaceRoot: project,
         });
-        assert(!result.some((entry) => entry?.block), `${profile} is not blocked`);
+        assert(
+          !result.some((entry) => entry?.block),
+          `${profile} is not blocked`,
+        );
       }
-      eq(
-        asked(),
-        0,
-        "no system-risk confirmation is shown",
-      );
+      eq(asked(), 0, "no system-risk confirmation is shown");
       eq(
         harness.execCalls.length,
         0,
@@ -463,9 +465,9 @@ await test("pis ignores restrictive permission selections for tools and project_
         "writes remain available after selecting readonly",
       );
       assert(
-        !(
-          await call("bash", { command: "rm -rf /tmp/pis-open-test" })
-        ).some((entry) => entry?.block),
+        !(await call("bash", { command: "rm -rf /tmp/pis-open-test" })).some(
+          (entry) => entry?.block,
+        ),
         "destructive shell commands remain available after selecting readonly",
       );
       eq(asked(), 0, "restrictive selection causes no confirmation dialog");
@@ -489,10 +491,7 @@ await test("pis does not block a risky action when confirmations are disabled", 
   await withSystemProfile(async (cwd) => {
     const { call, asked } = await startSystem(cwd, { confirm: false });
     const results = await call("bash", { command: "git reset --hard HEAD~1" });
-    assert(
-      !results.some((entry) => entry?.block),
-      "the call is not blocked",
-    );
+    assert(!results.some((entry) => entry?.block), "the call is not blocked");
     eq(asked(), 0, "no confirmation was shown");
   });
 });
@@ -553,7 +552,7 @@ await test("pis leaves user shell commands and workspace_add unblocked", async (
   });
 });
 
-await test("pis skips the setup-core verifier preflight blocks", async () => {
+await test("pis enforces the verifier evidence contract without a permission gate", async () => {
   if (!setupCore) return;
   await withSystemProfile(async (cwd) => {
     const harness = createHarness();
@@ -569,8 +568,8 @@ await test("pis skips the setup-core verifier preflight blocks", async () => {
       context,
     );
     assert(
-      !results.some((entry) => entry?.block),
-      "PIS verifier contract checks do not block tool calls",
+      results.some((entry) => entry?.block),
+      "PIS rejects an incomplete verifier contract before execution",
     );
   });
 });

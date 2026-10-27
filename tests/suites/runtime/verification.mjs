@@ -1712,6 +1712,170 @@ export const verificationSections = {
           "openai-codex/gpt-5.6-terra:low",
           "recursive project agent discovery strips quoted frontmatter values",
         );
+
+        const previousProfile = process.env.PI_LAUNCH_PROFILE;
+        try {
+          process.env.PI_LAUNCH_PROFILE = "system";
+          const systemHarness = createHarness();
+          setupCore.default(systemHarness.api, {
+            exec: systemHarness.api.exec,
+          });
+          const systemSession = systemHarness.makeContext({
+            cwd: artifactDir,
+            sessionId: "system-ticket-session",
+            trusted: true,
+          });
+          await systemHarness.runHooks("session_start", {}, systemSession);
+          const makeCall = (toolCallId, cwd) => ({
+            toolName: "subagent",
+            toolCallId,
+            input: {
+              cwd,
+              spec: {
+                profile: "verify",
+                objective: "Verify the target repository.",
+                delegationReason: "Independent review was requested.",
+                verification: {
+                  originalRequest: "Verify the change.",
+                  delegatedQuestion: "Find regressions.",
+                  diff: "Current target diff.",
+                  baseline: "Clean before the change.",
+                  acceptance: "No regressions.",
+                  trigger: "user_requested",
+                  triggerEvidence: "The user requested an independent review.",
+                },
+              },
+            },
+          });
+          for (const invalid of [
+            undefined,
+            "relative",
+            artifactDir,
+            path.join(workspace, "extensions"),
+          ]) {
+            const rejected = await systemHarness.runHooks(
+              "tool_call",
+              makeCall(`invalid-${invalid}`, invalid),
+              systemSession,
+            );
+            assert(
+              rejected.some((entry) => entry?.block),
+              "system verifier rejects missing, relative, non-repository and non-root cwd",
+            );
+          }
+          const invalidDirect = await systemHarness.runHooks(
+            "tool_call",
+            {
+              toolName: "subagent",
+              toolCallId: "system-invalid-direct",
+              input: { agent: "verifier", cwd: workspace, task: "check" },
+            },
+            systemSession,
+          );
+          assert(
+            invalidDirect.some((entry) => entry?.block),
+            "system verifier rejects incomplete direct contracts",
+          );
+          const budgetCall = makeCall("system-budget", workspace);
+          budgetCall.input.turnBudget = 1;
+          const invalidBudget = await systemHarness.runHooks(
+            "tool_call",
+            budgetCall,
+            systemSession,
+          );
+          assert(
+            invalidBudget.some((entry) => entry?.block),
+            "system verifier rejects per-run budget overrides",
+          );
+          const aliasCall = makeCall("system-timeout-alias", workspace);
+          aliasCall.input.maxRuntimeMs = 1;
+          const invalidAlias = await systemHarness.runHooks(
+            "tool_call",
+            aliasCall,
+            systemSession,
+          );
+          assert(
+            invalidAlias.some((entry) => entry?.block),
+            "system verifier rejects the executor timeout alias",
+          );
+          const oldSessionStart = systemHarness.runHooks(
+            "tool_call",
+            makeCall("system-old-generation", workspace),
+            systemSession,
+          );
+          await systemHarness.runHooks("session_start", {}, systemSession);
+          const oldSessionResult = await oldSessionStart;
+          assert(
+            oldSessionResult.some((entry) => entry?.block),
+            "system verifier rejects a session restart during contract assessment even with the same session ID",
+          );
+          const call = makeCall("system-ticket", workspace);
+          const started = await systemHarness.runHooks(
+            "tool_call",
+            call,
+            systemSession,
+          );
+          assert(
+            !started.some((entry) => entry?.block),
+            "system verifier accepts the explicit repository root",
+          );
+          eq(
+            call.input.agent,
+            "verifier",
+            "system verifier spec is translated before execution",
+          );
+          assert(
+            !call.input.spec,
+            "translated system verifier does not reach the package as a temporary spec",
+          );
+          eq(
+            call.input.acceptance?.level,
+            "none",
+            "system verifier uses the canonical executor acceptance contract",
+          );
+          await systemHarness.runHooks(
+            "tool_result",
+            {
+              toolName: "subagent",
+              toolCallId: "system-ticket",
+              input: call.input,
+              content: [{ type: "text", text: "PASS" }],
+              details: {
+                runId: "system-child",
+                results: [
+                  {
+                    agent: "verifier",
+                    exitCode: 0,
+                    model: "openai-codex/gpt-5.6-terra:low",
+                    finalOutput: "PASS",
+                  },
+                ],
+              },
+            },
+            systemSession,
+          );
+          const systemResult = systemHarness.appended.find(
+            (entry) => entry.customType === "verifier-run",
+          );
+          assert(
+            Boolean(systemResult),
+            `system result recorded: ${JSON.stringify(systemHarness.appended.filter((entry) => entry.customType?.startsWith("verifier-run")))}`,
+          );
+          eq(
+            systemResult?.data.ticket?.canonicalRoot,
+            workspace,
+            "system ticket binds the explicit target rather than the private session workspace",
+          );
+          eq(
+            systemResult?.data.status,
+            "completed",
+            "system verifier result is bound to its launch ticket",
+          );
+        } finally {
+          if (previousProfile === undefined)
+            delete process.env.PI_LAUNCH_PROFILE;
+          else process.env.PI_LAUNCH_PROFILE = previousProfile;
+        }
       } finally {
         rmSync(workspace, { recursive: true, force: true });
         rmSync(artifactDir, { recursive: true, force: true });

@@ -8,7 +8,10 @@ import type {
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { catalogDescription } from "../shared/command-catalog.ts";
 import { trackedExec } from "../shared/tracked-exec.ts";
-import { collectWorkspaceSnapshot } from "../../shared/workspace-snapshot.mjs";
+import {
+  collectWorkspaceSnapshot,
+  probeGitRepository,
+} from "../../shared/workspace-snapshot.mjs";
 import { Type } from "typebox";
 import { DEFAULT_MAX_BYTES, limitTextOutput } from "../shared/output-limits.ts";
 import {
@@ -28,7 +31,12 @@ import {
 } from "./verifier-ticket.ts";
 import { rewriteVerifySpecToVerifier } from "../permissions/temporary-agent-policy.ts";
 import {
+  assessVerifierDelegation,
+  normalizeVerifierDelegationInput,
+} from "../permissions/verifier-policy.ts";
+import {
   VERIFICATION_CAPABILITY_EVENTS,
+  requestVerificationCapabilities,
   type VerificationCapabilityRequest,
 } from "../shared/verification-capabilities.ts";
 import { loadVerifyProfiles, runProfile } from "./verify-profiles.ts";
@@ -417,7 +425,7 @@ export default function setupCore(
   )("tool_call", async (event, ctx) => {
     activeCwd = ctx.cwd;
     activeWorkspaceRoot = canonicalWorkspaceRoot(ctx.cwd) ?? ctx.cwd;
-    if (getPiLaunchProfile() === "system") return;
+    const systemProfile = getPiLaunchProfile() === "system";
     if (!isVerifierSingleCall(event)) return;
     const modeIssue = verifierSingleCallIssue(event);
     if (modeIssue) return { block: true, reason: modeIssue };
@@ -426,16 +434,25 @@ export default function setupCore(
     // rewrites it to the legacy `agent: verifier` input. Derive the identical
     // normalized input here so the ticket binds to the exact run the package
     // will execute instead of leaving its result `unbound-ticket`.
-    const verifyRewrite = rewriteVerifySpecToVerifier(event);
+    const originalInput = event.input as Record<string, unknown>;
+    const { cwd: systemCwd, ...specInput } = originalInput;
+    const verifyRewrite = rewriteVerifySpecToVerifier(
+      systemProfile ? { ...event, input: specInput } : event,
+    );
     if (verifyRewrite.kind === "blocked") {
       return { block: true, reason: verifyRewrite.reason };
     }
     const ticketEvent =
       verifyRewrite.kind === "rewritten"
-        ? { ...event, input: verifyRewrite.input }
+        ? {
+            ...event,
+            input: systemProfile
+              ? { ...verifyRewrite.input, cwd: systemCwd }
+              : verifyRewrite.input,
+          }
         : event;
     const input = ticketEvent.input as Record<string, unknown>;
-    if (input.cwd !== undefined) {
+    if (!systemProfile && input.cwd !== undefined) {
       return {
         block: true,
         reason:
@@ -449,7 +466,34 @@ export default function setupCore(
           "Verifier-Delegation abgelehnt: für diese toolCallId existiert bereits ein unverbrauchtes Ticket.",
       };
     }
-    const root = canonicalWorkspaceRoot(ctx.cwd);
+    if (
+      systemProfile &&
+      (typeof input.cwd !== "string" || !isAbsolute(input.cwd))
+    ) {
+      return {
+        block: true,
+        reason:
+          "Verifier-Delegation abgelehnt: Im Systemprofil muss cwd die absolute Wurzel des zu prüfenden Git-Repositories bezeichnen.",
+      };
+    }
+    const root = canonicalWorkspaceRoot(
+      systemProfile ? (input.cwd as string) : ctx.cwd,
+    );
+    if (systemProfile && root) {
+      const repository = probeGitRepository(root);
+      if (
+        !repository.ok ||
+        !repository.hasRepository ||
+        canonicalWorkspaceRoot(repository.root) !== root
+      ) {
+        return {
+          block: true,
+          reason:
+            "Verifier-Delegation abgelehnt: cwd muss eine erreichbare kanonische Git-Repository-Wurzel sein.",
+        };
+      }
+      input.cwd = root;
+    }
     const sessionId = ctx.sessionManager.getSessionId();
     if (!root || typeof sessionId !== "string" || !sessionId.trim()) {
       return {
@@ -459,7 +503,23 @@ export default function setupCore(
       };
     }
     const generation = sessionGeneration;
-    const snapshotResult = await collectWorkspaceSnapshot(ctx.cwd);
+    if (systemProfile) {
+      const { cwd: _cwd, ...assessmentInput } = input;
+      const assessment = await assessVerifierDelegation(
+        { ...ticketEvent, input: assessmentInput },
+        root,
+        requestVerificationCapabilities(pi.events, root),
+      );
+      if (assessment.blocked) return { block: true, reason: assessment.reason };
+    }
+    if (generation !== sessionGeneration || activeSessionId !== sessionId) {
+      return {
+        block: true,
+        reason:
+          "Verifier-Delegation abgelehnt: Die Sitzung wechselte während der Vertragsprüfung.",
+      };
+    }
+    const snapshotResult = await collectWorkspaceSnapshot(root);
     if (generation !== sessionGeneration || activeSessionId !== sessionId) {
       return {
         block: true,
@@ -473,9 +533,24 @@ export default function setupCore(
         reason: `Verifier-Delegation abgelehnt: Start-Fingerprint nicht belegbar (${snapshotResult.error.code}).`,
       };
     }
+    if (systemProfile) {
+      const repository = probeGitRepository(root);
+      if (
+        canonicalWorkspaceRoot(input.cwd as string) !== root ||
+        !repository.ok ||
+        !repository.hasRepository ||
+        canonicalWorkspaceRoot(repository.root) !== root
+      ) {
+        return {
+          block: true,
+          reason:
+            "Verifier-Delegation abgelehnt: Die Repository-Wurzel änderte sich während der Snapshot-Erfassung.",
+        };
+      }
+    }
     const ticket = createVerifierTicket(
       ticketEvent,
-      ctx,
+      systemProfile ? { ...ctx, cwd: root } : ctx,
       snapshotResult.snapshot,
       generation,
       pi.getThinkingLevel(),
@@ -485,6 +560,36 @@ export default function setupCore(
         block: true,
         reason:
           "Verifier-Delegation abgelehnt: effektives Modell ist vor dem Start nicht belegbar.",
+      };
+    }
+    if (systemProfile) {
+      const normalized = await normalizeVerifierDelegationInput(
+        ticketEvent,
+        root,
+      );
+      if (!normalized) {
+        return {
+          block: true,
+          reason:
+            "Verifier-Delegation abgelehnt: Der Executor-Vertrag konnte nicht normalisiert werden.",
+        };
+      }
+      if (generation !== sessionGeneration || activeSessionId !== sessionId) {
+        return {
+          block: true,
+          reason:
+            "Verifier-Delegation abgelehnt: Die Sitzung wechselte während der Vertragsvorbereitung.",
+        };
+      }
+      const target = event.input as Record<string, unknown>;
+      delete target.spec;
+      Object.assign(target, normalized);
+    }
+    if (verifierTickets.has(event.toolCallId)) {
+      return {
+        block: true,
+        reason:
+          "Verifier-Delegation abgelehnt: für diese toolCallId existiert bereits ein unverbrauchtes Ticket.",
       };
     }
     verifierTickets.set(event.toolCallId, ticket);
