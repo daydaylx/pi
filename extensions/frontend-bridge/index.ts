@@ -175,6 +175,7 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
   let requestFallbackTimer: ReturnType<typeof setTimeout> | undefined;
   let sawExternalRequest = false;
   const subagentRuns = new Map<string, FrontendSubagentBranch[]>();
+  const dirtyFields = new Set<keyof FrontendUiState>();
 
   function scheduleFlush(): void {
     if (flushTimer) clearTimeout(flushTimer);
@@ -182,14 +183,19 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
       flushTimer = undefined;
       if (!sessionEpoch) return;
       updateTask(state, lastUserPrompt);
-      const snapshot: Partial<FrontendUiState> = {
-        permissions: state.permissions,
-        lsp: state.lsp,
-        changes: state.changes,
-        verification: state.verification,
-        task: state.task,
-        subagents: flattenSubagents(subagentRuns),
-      };
+      const snapshot: Partial<FrontendUiState> = {};
+      for (const field of dirtyFields) {
+        if (field === "subagents")
+          snapshot.subagents = flattenSubagents(subagentRuns);
+        else if (field === "task") snapshot.task = state.task;
+        else if (field === "permissions")
+          snapshot.permissions = state.permissions;
+        else if (field === "lsp") snapshot.lsp = state.lsp;
+        else if (field === "changes") snapshot.changes = state.changes;
+        else if (field === "verification")
+          snapshot.verification = state.verification;
+      }
+      dirtyFields.clear();
       pi.appendEntry(STATE_ENTRY_TYPE, {
         v: PROTOCOL_VERSION,
         sessionEpoch,
@@ -203,7 +209,13 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
     // Der neutrale Merge mutiert state und meldet, ob sich etwas geändert hat.
     // task/subagents werden separat verwaltet und bei Bedarf geflushed.
     const changed = mergeFrontendUiState(state, patch);
-    if (changed) scheduleFlush();
+    if (changed) {
+      for (const field of Object.keys(patch) as (keyof FrontendUiState)[])
+        dirtyFields.add(field);
+      // Task-Phase hängt vom Core-Aktivitätszustand ab.
+      if (patch.activity) dirtyFields.add("task");
+      scheduleFlush();
+    }
   }
 
   function handleRequest(value: unknown): void {
@@ -234,12 +246,14 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
     const started = subagentStartEvent(value);
     if (!started) return;
     subagentRuns.set(started.runId, started.entries);
+    dirtyFields.add("subagents");
     scheduleFlush();
   }
 
   function handleSubagentCompleted(value: unknown): void {
     const runId = subagentCompletionId(value);
     if (!runId || !subagentRuns.delete(runId)) return;
+    dirtyFields.add("subagents");
     scheduleFlush();
   }
 
@@ -256,6 +270,7 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
           : entry,
       ),
     );
+    dirtyFields.add("subagents");
     scheduleFlush();
   }
 
@@ -277,6 +292,7 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
       .join("");
     if (text) {
       lastUserPrompt = text;
+      dirtyFields.add("task");
       scheduleFlush();
     }
   });
@@ -291,6 +307,7 @@ export default function frontendBridgeExtension(pi: ExtensionAPI): void {
     sessionEpoch = undefined;
     lastUserPrompt = undefined;
     state = defaultState();
+    dirtyFields.clear();
     sessionId = ctx.sessionManager.getSessionId();
     subagentRuns.clear();
     // Ohne ein anderes Frontend (z. B. Aurora im TUI-Modus) öffnet die

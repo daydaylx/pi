@@ -1,0 +1,26 @@
+M-20: Frontend-Bridge sparse state/replay
+Datum: 2026-10-27
+Repository: /home/g/Projekte/pi
+Baseline: bc3b10c
+
+Finale Prüfungen (Exitcodes):
+  PI_TEST_SUITE=runtime node tests/run.mjs
+  exit 0 — PASS: 1839 passed, 0 failed
+
+  node --test frontend-server/test/server.test.mjs
+  exit 0 — 24 Tests, 24 bestanden, 0 fehlgeschlagen
+
+  npm --prefix npm run typecheck
+  exit 0 — tsc --noEmit -p ../tsconfig.json
+
+  npm --prefix npm exec prettier -- --check extensions/frontend-bridge/index.ts tests/suites/runtime/frontend-bridge.mjs
+  exit 0 — beide geänderten Dateien entsprechen dem Prettier-Format
+
+Replay-/Wirkungsnachweise in den Tests:
+- Alte vollständige Bridge-Einträge plus Sparse-Änderung ergeben denselben letzten Feldzustand.
+- Veraltete Epochs und Sessionwechsel erzeugen keine Zustandsübernahme.
+- Ein Abschlussereignis enthält nur `subagents`; die JSON-serialisierte Payload ist kleiner als die zuvor gespeicherte vollständige Projektion.
+- Server-Normalisierung erhält nicht angefasste Felder aus alten Volleinträgen.
+- Reguläre TUI-Sitzungen erzeugen weiterhin keine Bridge-Einträge.
+
+Während der Iteration schlug der Runtime-Test zunächst fehl, weil er für eine neue Session noch den nun absichtlich nicht persistierten Standard-Task im Sparse-Eintrag erwartete. Die Erwartung wurde auf das neue Merge-/Default-Verhalten geändert; der finale vollständige Runtime-Lauf ist grün. Kein Liveprozess, keine Installation und kein Dienst wurde verändert.

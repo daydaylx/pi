@@ -8,6 +8,13 @@ import { createHarness } from "../../shared/harness.mjs";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function replayBridgeState(entries) {
+  return entries.reduce(
+    (state, entry) => ({ ...state, ...entry.data.state }),
+    {},
+  );
+}
+
 export const frontendBridgeSections = {
   "frontend bridge core state transport": async (context) => {
     const { section, load } = context;
@@ -180,7 +187,7 @@ export const frontendBridgeSections = {
         "fremde Epochen erzeugen keinen neuen Eintrag",
       );
       eq(
-        entriesAfter.at(-1).data.state.permissions.level,
+        replayBridgeState(entriesAfter).permissions.level,
         "confirm-all",
         "fremde Epochen verändern den Zustand nicht",
       );
@@ -191,11 +198,36 @@ export const frontendBridgeSections = {
       const finalEntries = harness.appended.filter(
         (entry) => entry.customType === "frontend-bridge/state",
       );
+      const finalEntry = finalEntries.at(-1);
       eq(
-        finalEntries.at(-1).data.state.subagents.length,
+        replayBridgeState(finalEntries).subagents.length,
         0,
         "abgeschlossene Subagenten werden entfernt",
       );
+      eq(
+        Object.keys(finalEntry.data.state).join(","),
+        "subagents",
+        "Änderungseinträge enthalten nur geänderte Felder",
+      );
+      assert(
+        JSON.stringify(finalEntry.data.state).length <
+          JSON.stringify(entries.at(-1).data.state).length,
+        "Teiländerung ist kleiner als ein weiterer Volleintrag",
+      );
+      const replayed = replayBridgeState(finalEntries);
+      eq(
+        replayed.permissions.level,
+        "confirm-all",
+        "Replay erhält Permissions",
+      );
+      eq(
+        replayed.verification.status,
+        "verified",
+        "Replay erhält Verification",
+      );
+      eq(replayed.changes.filesCount, 2, "Replay erhält Changes");
+      eq(replayed.lsp.state, "ready", "Replay erhält LSP");
+      eq(replayed.task.title, "Bridge-Zustände prüfen", "Replay erhält Task");
 
       // Ein neuer Session-Start darf weder den zuletzt eingegebenen Prompt
       // noch einen alten, verzögerten Flush übernehmen.
@@ -223,9 +255,9 @@ export const frontendBridgeSections = {
       const resumed = resumedEntries.at(-1).data;
       eq(resumed.sessionId, "next-session", "neue Session-ID wird übernommen");
       eq(
-        resumed.state.task.title,
-        "Aktuelle Aufgabe",
-        "neue Session erbt keinen alten Nutzertitel",
+        "task" in resumed.state,
+        false,
+        "unveränderter Standard-Task wird nicht erneut persistiert",
       );
 
       await harness.runHooks("session_shutdown", {}, nextCtx);

@@ -107,6 +107,38 @@ test("maps bridge state without exposing a session file", () => {
   assert.equal(JSON.stringify(patch).includes("sessionFile"), false);
 });
 
+test("replays legacy bridge snapshots together with sparse state entries", () => {
+  let state = {
+    workflow: undefined,
+    task: { title: "Aktuelle Aufgabe", phaseLabel: "Bereit", status: "idle" },
+    activity: { kind: "idle" },
+    permissions: { options: [] },
+    lsp: {},
+    model: { available: [] },
+    thinking: { available: [] },
+    changes: null,
+    verification: null,
+    subagents: [],
+  };
+  const legacyFullSnapshot = {
+    permissions: { level: "confirm-all", label: "Bestätigen" },
+    lsp: { state: "ready", detail: "2 Server" },
+    changes: { filesCount: 2, files: ["a.ts", "b.ts"] },
+    verification: { status: "verified", requiredOutcomes: { verify: "success" }, blockingRecommendedIds: [] },
+    task: { title: "Alte Aufgabe", phaseLabel: "Arbeiten" },
+    subagents: [{ runId: "old-run", agent: "reviewer", role: "review", status: "running" }],
+  };
+  state = { ...state, ...normalizeBridgeState(legacyFullSnapshot, state) };
+  const sparseEntry = { permissions: { level: "readonly", label: "Nur Lesen" } };
+  state = { ...state, ...normalizeBridgeState(sparseEntry, state) };
+  assert.equal(state.permissions.current, "readonly");
+  assert.equal(state.lsp.state, "ready");
+  assert.equal(state.changes.filesCount, 2);
+  assert.equal(state.verification.status, "verified");
+  assert.equal(state.task.title, "Alte Aufgabe");
+  assert.equal(state.subagents[0].runId, "old-run");
+});
+
 test("does not confuse agent lifecycle with message lifecycle", () => {
   assert.equal(mapRuntimeEvent({ type: "agent_start" }, 1), undefined);
   assert.equal(mapRuntimeEvent({ type: "agent_settled" }, 2), undefined);
