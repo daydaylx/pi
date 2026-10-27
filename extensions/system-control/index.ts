@@ -123,7 +123,7 @@ const JournalParams = strictObject({
   priority: Type.Optional(Type.String({ enum: [...PRIORITIES] })),
 });
 const DesktopParams = strictObject({
-  what: Type.String({ enum: ["workspaces", "monitors", "active"] }),
+  what: Type.String({ enum: ["workspaces", "monitors", "active", "clients"] }),
 });
 const WorkspaceParams = strictObject({
   n: Type.Integer({ minimum: 1, maximum: 99 }),
@@ -390,7 +390,8 @@ export function registerSystemControl(
     {
       name: SYSTEM_CONTROL_TOOL.desktopState,
       label: "Desktopstatus",
-      description: "Liest Arbeitsflächen, Monitore oder das aktive Fenster.",
+      description:
+        "Liest Arbeitsflächen, Monitore, Fenster oder das aktive Fenster; Fenstertitel werden nicht ausgegeben.",
       parameters: DesktopParams,
       run: async (p: Record<string, unknown>) => {
         const missing = desktopRequired();
@@ -420,17 +421,19 @@ export function registerSystemControl(
               )
                 throw new Error("Invalid desktop list structure");
               const fields =
-                what === "workspaces"
-                  ? ["id", "name", "monitor", "windows", "hasfullscreen"]
-                  : [
-                      "id",
-                      "name",
-                      "width",
-                      "height",
-                      "refreshRate",
-                      "activeWorkspace",
-                      "focused",
-                    ];
+                what === "clients"
+                  ? ["address", "class", "workspace"]
+                  : what === "workspaces"
+                    ? ["id", "name", "monitor", "windows", "hasfullscreen"]
+                    : [
+                        "id",
+                        "name",
+                        "width",
+                        "height",
+                        "refreshRate",
+                        "activeWorkspace",
+                        "focused",
+                      ];
               if (v.some((entry) => fields.some((field) => !(field in entry))))
                 throw new Error("Incomplete desktop list structure");
               return JSON.stringify(

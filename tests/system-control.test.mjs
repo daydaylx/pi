@@ -653,7 +653,16 @@ test("Jede Aktion nutzt feste argv und eine minimale Kindumgebung", async () => 
                     initialTitle: "secret",
                   },
                 ])
-              : "ok",
+              : file === "hyprctl" && args[1] === "clients"
+                ? JSON.stringify([
+                    {
+                      address: "0xabc",
+                      class: "PiSystem",
+                      workspace: { id: 2 },
+                      title: "secret window title",
+                    },
+                  ])
+                : "ok",
       stderr: "",
     };
   });
@@ -671,7 +680,11 @@ test("Jede Aktion nutzt feste argv und eine minimale Kindumgebung", async () => 
     const desktop = await invoke("desktop_state", { what: "active" });
     const workspaces = await invoke("desktop_state", { what: "workspaces" });
     const monitors = await invoke("desktop_state", { what: "monitors" });
-    for (const result of [desktop, workspaces, monitors]) {
+    const clients = await invoke("desktop_state", { what: "clients" });
+    assert.deepEqual(calls.pop().args, ["-j", "clients"]);
+    assert.match(clients.content[0].text, /"address":"0xabc"/);
+    assert.match(clients.content[0].text, /"class":"PiSystem"/);
+    for (const result of [desktop, workspaces, monitors, clients]) {
       for (const titleField of ["title", "lastwindowtitle", "initialTitle"])
         assert.equal(result.content[0].text.includes(titleField), false);
     }
