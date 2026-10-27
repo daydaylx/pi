@@ -11,6 +11,9 @@ Extensions und Policies bleiben maßgeblich.
 - Lies den Zielbereich unmittelbar vor einer Änderung frisch. Nach einem
   fehlgeschlagenen Read, Pfadzugriff oder Patch-Kontext lies den tatsächlichen
   Zustand neu, statt den Versuch blind zu variieren.
+- Ein ausdrücklich beauftragter Read-only-Audit verlangt die tatsächliche
+  Prüfung der benannten Quellen und einen belegten Befund. Eine reine
+  Informationsfrage bleibt davon getrennt und braucht keinen erzwungenen Toollauf.
 - Teile größere Änderungen in kleine Schritte. Führe zuerst den engsten
   betroffenen Test aus. Starte Tests im Paketverzeichnis, das CI verwendet.
 - Weise vorbestehende Fehler nur mit einer belegten Ausgangsbaseline als
