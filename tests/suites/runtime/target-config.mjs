@@ -69,7 +69,7 @@ export const targetConfigSections = {
           "subagent runtime remains immutable-pinned",
         );
         assert(
-          packageSources.includes("npm:pi-web-access@0.24.2"),
+          packageSources.includes("npm:pi-web-access@0.45.0"),
           "web access runtime remains exact-version-pinned",
         );
         const subagentSettings = settings.subagents;
