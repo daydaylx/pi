@@ -849,12 +849,25 @@ export const resilienceSections = {
         (entry) =>
           typeof entry === "string" && entry.startsWith("+extensions/"),
       );
-      eq(
-        activeExtensions,
-        Object.keys(factoryByExtension),
-        "combined stack activates exactly the configured local entry points",
+      const builtInExtensions = activeExtensions.filter((extension) =>
+        Object.hasOwn(factoryByExtension, extension),
       );
-      const factories = activeExtensions.map(
+      const additionalExtensions = activeExtensions.filter(
+        (extension) => !Object.hasOwn(factoryByExtension, extension),
+      );
+      eq(
+        builtInExtensions,
+        Object.keys(factoryByExtension),
+        "combined stack activates every supported local entry point",
+      );
+      for (const extension of additionalExtensions) {
+        const module = await load(extension.slice(1));
+        assert(
+          typeof module?.default === "function",
+          `additional local extension exports a factory: ${extension.slice(1)}`,
+        );
+      }
+      const factories = builtInExtensions.map(
         (extension) => factoryByExtension[extension],
       );
       const harness = createHarness();

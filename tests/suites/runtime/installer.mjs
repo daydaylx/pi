@@ -64,6 +64,10 @@ export const installerSections = {
         deployedSet.has("web-search.json"),
         "greenfield includes root-level web-search.json",
       );
+      assert(
+        deployedSet.has("knip.json"),
+        "greenfield includes knip.json for installed target checks",
+      );
       for (const prompt of [
         "analyse.md",
         "docs-check.md",
@@ -201,6 +205,10 @@ export const installerSections = {
         assert(
           existsSync(path.join(target, "web-search.json")),
           "deployed target contains web-search.json",
+        );
+        assert(
+          existsSync(path.join(target, "knip.json")),
+          "deployed target contains knip.json for installed target checks",
         );
         for (const launcher of [
           "bin/pi",

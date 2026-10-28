@@ -26,6 +26,7 @@ const ALLOWLIST = [
   "APPEND_SYSTEM.md",
   "README.md",
   "package.json",
+  "knip.json",
   "settings.json",
   "models.json",
   "web-search.json",
