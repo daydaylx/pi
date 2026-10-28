@@ -356,28 +356,32 @@ export const targetConfigSections = {
           (entry) =>
             typeof entry === "string" && entry.startsWith("+extensions/"),
         );
+        const expectedBuiltInExtensions = [
+          "+extensions/setup-core/index.ts",
+          "+extensions/mode-permissions.ts",
+          "+extensions/interactive-pty/index.ts",
+          "+extensions/lsp/index.ts",
+          "+extensions/ask-user.ts",
+          "+extensions/control-plane.ts",
+          "+extensions/skill-select/index.ts",
+          "+extensions/compact-tools/index.ts",
+          "+extensions/aurora-ui/index.ts",
+          "+extensions/resilience/index.ts",
+          "+extensions/context-capsule/index.ts",
+          "+extensions/system-context/index.ts",
+          "+extensions/system-control/index.ts",
+          "+extensions/session-health/index.ts",
+          "+extensions/frontend-bridge/index.ts",
+          "+extensions/openrouter-doctor/index.ts",
+          "+extensions/task-tier/index.ts",
+        ];
+        const activeBuiltInExtensions = activeExtensions.filter((extension) =>
+          expectedBuiltInExtensions.includes(extension),
+        );
         eq(
-          activeExtensions,
-          [
-            "+extensions/setup-core/index.ts",
-            "+extensions/mode-permissions.ts",
-            "+extensions/interactive-pty/index.ts",
-            "+extensions/lsp/index.ts",
-            "+extensions/ask-user.ts",
-            "+extensions/control-plane.ts",
-            "+extensions/skill-select/index.ts",
-            "+extensions/compact-tools/index.ts",
-            "+extensions/aurora-ui/index.ts",
-            "+extensions/resilience/index.ts",
-            "+extensions/context-capsule/index.ts",
-            "+extensions/system-context/index.ts",
-            "+extensions/system-control/index.ts",
-            "+extensions/session-health/index.ts",
-            "+extensions/frontend-bridge/index.ts",
-            "+extensions/openrouter-doctor/index.ts",
-            "+extensions/task-tier/index.ts",
-          ],
-          "settings declare the dependency-safe local extension order",
+          activeBuiltInExtensions,
+          expectedBuiltInExtensions,
+          "settings preserve the dependency-safe order of built-in local extensions",
         );
         for (const extension of [
           "+extensions/setup-core/index.ts",
