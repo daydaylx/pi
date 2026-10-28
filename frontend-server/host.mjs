@@ -620,9 +620,14 @@ export class PiSystemHost {
       if (typeof id === "string")
         eventData = this.trackUiRequest(id, frame.data);
     }
-    // A client that has observed a tool start must not outrun the durable
-    // action record if the host crashes immediately afterwards.
-    if (frame.event === "tool.started")
+    // Clients must not observe tool lifecycle events before the corresponding
+    // action record is durable if the host crashes immediately afterwards.
+    const persistBeforePublish = [
+      "tool.started",
+      "tool.completed",
+      "tool.failed",
+    ].includes(frame.event);
+    if (persistBeforePublish)
       this.handleRunLifecycleEvent(frame.event, eventData);
     for (const client of this.clients.values()) {
       if (!client.ready) continue;
@@ -633,7 +638,7 @@ export class PiSystemHost {
         frame.sessionId,
       );
     }
-    if (frame.event !== "tool.started")
+    if (!persistBeforePublish)
       this.handleRunLifecycleEvent(frame.event, eventData);
   }
 

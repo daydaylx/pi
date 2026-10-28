@@ -1226,3 +1226,123 @@ test("host persists tool start before announcing it to clients", () => {
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test("host persists tool outcomes before announcing them to clients", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-host-end-order-"));
+  const agentDir = path.join(temp, "agent");
+  mkdirSync(agentDir, { mode: 0o700 });
+  const host = new PiSystemHost({
+    env: { HOME: temp, PI_CODING_AGENT_DIR: agentDir },
+    runtimeDir: temp,
+  });
+  try {
+    host.state = { session: { id: "test", cwd: temp } };
+    host.runStore = new RunStore({
+      runsDir: path.join(temp, "runs"),
+      hostEpoch: "test",
+    });
+    const run = host.runStore.createRun({
+      sessionId: "test",
+      message: "isolated crash test",
+    });
+    host.clients.set("test", { ready: true });
+    let announced = 0;
+    host.sendClientEvent = (_client, event) => {
+      if (event !== "tool.completed" && event !== "tool.failed") return;
+      announced++;
+      const persisted = JSON.parse(
+        readFileSync(path.join(temp, "runs", `${run.runId}.json`), "utf8"),
+      );
+      const action = persisted.actions.at(-1);
+      assert.ok(action.finishedAt);
+      assert.notEqual(action.effectState, "executing");
+      assert.equal(action.toolCallId, event === "tool.failed" ? "error" : "success");
+    };
+    for (const [id, isError] of [["success", false], ["error", true]]) {
+      host.handleBackendFrame({ kind: "event", event: "tool.started", data: { toolCallId: id, toolName: "bash" } });
+      host.handleBackendFrame({ kind: "event", event: isError ? "tool.failed" : "tool.completed", data: { toolCallId: id, toolName: "bash", isError } });
+    }
+    assert.equal(announced, 2);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("host records verification readback before its tool completion event", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-host-verify-order-"));
+  const agentDir = path.join(temp, "agent");
+  mkdirSync(agentDir, { mode: 0o700 });
+  const host = new PiSystemHost({
+    env: { HOME: temp, PI_CODING_AGENT_DIR: agentDir },
+    runtimeDir: temp,
+  });
+  try {
+    const goal = { kind: "workspace", workspace: 2 };
+    let probes = 0;
+    host.state = { session: { id: "test", cwd: temp } };
+    host.runStore = new RunStore({
+      runsDir: path.join(temp, "runs"),
+      hostEpoch: "test",
+      stateReader: () => {
+        probes++;
+        return {
+          passed: true,
+          source: "hyprland:activeworkspace",
+          observation: { workspace: 2 },
+        };
+      },
+    });
+    const run = host.runStore.createRun({
+      sessionId: "test",
+      message: "verify workspace",
+    });
+    host.clients.set("test", { ready: true });
+    const sent = [];
+    host.sendClientEvent = (_client, event) => {
+      sent.push(event);
+    };
+    host.handleBackendFrame({
+      kind: "event",
+      event: "tool.started",
+      data: {
+        toolCallId: "action",
+        toolName: "desktop_switch_workspace",
+        systemTarget: goal,
+      },
+    });
+    host.handleBackendFrame({
+      kind: "event",
+      event: "tool.completed",
+      data: {
+        toolCallId: "action",
+        toolName: "desktop_switch_workspace",
+        isError: false,
+      },
+    });
+    host.handleBackendFrame({
+      kind: "event",
+      event: "tool.started",
+      data: { toolCallId: "verify", toolName: "system_state_verify" },
+    });
+    sent.length = 0;
+    host.handleBackendFrame({
+      kind: "event",
+      event: "tool.completed",
+      data: {
+        toolCallId: "verify",
+        toolName: "system_state_verify",
+        isError: false,
+        stateGoalCheck: goal,
+      },
+    });
+    assert.equal(probes, 1);
+    assert.equal(run.verification.at(-1).status, "passed");
+    assert.equal(sent.at(-1), "tool.completed");
+    assert.ok(
+      sent.indexOf("run.updated") >= 0 &&
+        sent.indexOf("run.updated") < sent.indexOf("tool.completed"),
+    );
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
