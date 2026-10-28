@@ -6,6 +6,61 @@ export const contextCapsuleSections = {
     const { section, contextCapsule } = context;
     await section("context capsule compaction lifecycle", async () => {
       if (!contextCapsule) return;
+      const capsuleHelpers = await context.load(
+        "extensions/context-capsule/capsule.ts",
+      );
+      if (!capsuleHelpers) return;
+
+      const extractedCriteria = capsuleHelpers.extractAcceptanceCriteria(
+        [
+          "## Abnahmekriterien",
+          "- Waybar öffnet das native Menü",
+          "- [ ] Build und Live-Prüfung sind erfolgreich",
+          "## Hinweise",
+          "- Dieser Hinweis ist kein Abnahmekriterium",
+        ].join("\n"),
+      );
+      eq(
+        extractedCriteria,
+        [
+          "Waybar öffnet das native Menü",
+          "Build und Live-Prüfung sind erfolgreich",
+        ],
+        "only explicitly grouped acceptance criteria are extracted",
+      );
+
+      const oversizedCapsule = capsuleHelpers.createContextCapsule({
+        objective: "O".repeat(1200),
+        acceptanceCriteria: Array.from(
+          { length: 8 },
+          (_, index) => `Criterion ${index + 1}: ${"界".repeat(150)}`,
+        ),
+        changedFiles: Array.from(
+          { length: 12 },
+          (_, index) => `src/${index}/${"path/".repeat(18)}file.ts`,
+        ),
+        openRisks: Array.from(
+          { length: 4 },
+          (_, index) => `Risk ${index + 1}: ${"r".repeat(145)}`,
+        ),
+        progress: Array.from({ length: 6 }, (_, index) => `Step ${index + 1}`),
+      });
+      const boundedJson =
+        capsuleHelpers.serializeContextCapsule(oversizedCapsule);
+      assert(
+        Buffer.byteLength(boundedJson, "utf8") <= 3 * 1024,
+        "oversized capsules are reduced to the target size",
+      );
+      eq(
+        JSON.parse(boundedJson).acceptanceCriteria.length,
+        8,
+        "acceptance criteria survive size reduction",
+      );
+      eq(
+        oversizedCapsule.changedFiles.length,
+        12,
+        "serialization does not mutate the active work state",
+      );
 
       const harness = createHarness();
       contextCapsule.default(harness.api);
@@ -14,8 +69,13 @@ export const contextCapsuleSections = {
       await harness.runHooks(
         "before_agent_start",
         {
-          prompt:
+          prompt: [
             "Implement the feature; API_KEY=abcd1234; Authorization: Bearer bearer_secret_123; password=plain_secret_456; AWS_SECRET_ACCESS_KEY=aws_secret_789; sk-proj-abcdefghijklmnopqrstuvwxyz123456.",
+            "",
+            "## Acceptance Criteria",
+            "- The native menu opens from Waybar",
+            "- Build and live verification pass",
+          ].join("\n"),
         },
         ctx,
       );
@@ -72,6 +132,24 @@ export const contextCapsuleSections = {
           "Current objective: Implement the feature",
         ),
         "objective resumes",
+      );
+      assert(
+        harness.sent[0].message.content.includes(
+          "The native menu opens from Waybar",
+        ),
+        "acceptance criteria resume",
+      );
+      assert(
+        harness.sent[0].message.content.includes(
+          "Continue the original request",
+        ),
+        "resume message identifies the original task as active",
+      );
+      assert(
+        harness.sent[0].message.content.includes(
+          "prior user-provided task data",
+        ),
+        "resumed task context is explicitly treated as user data",
       );
       assert(
         harness.sent[0].message.content.includes("src/new-file.ts"),
@@ -161,6 +239,131 @@ export const contextCapsuleSections = {
     await shortTurn.runHooks("agent_end", { messages: [] }, shortContext);
     eq(shortTurn.sent.length, 0, "short turn receives no capsule message");
     eq(shortTurn.appended.length, 0, "short turn creates no capsule telemetry");
+
+    const continuation = createHarness();
+    contextCapsule.default(continuation.api);
+    const continuationContext = continuation.makeContext();
+    await continuation.runHooks("session_start", {}, continuationContext);
+    await continuation.runHooks(
+      "before_agent_start",
+      {
+        prompt: [
+          "Implement the network popup.",
+          "## Abnahmekriterien",
+          "- Waybar starts the native popup",
+          "- The running UI is verified",
+        ].join("\n"),
+      },
+      continuationContext,
+    );
+    await continuation.runHooks(
+      "agent_end",
+      { messages: [] },
+      continuationContext,
+    );
+    const resumed = await continuation.runHooks(
+      "before_agent_start",
+      { prompt: "Dann weiter mit den offenen Punkten." },
+      continuationContext,
+    );
+    assert(
+      resumed
+        .at(-1)
+        ?.systemPrompt.includes(
+          "Current objective: Implement the network popup.",
+        ),
+      "short continuation restores the original objective",
+    );
+    assert(
+      resumed.at(-1)?.systemPrompt.includes("Waybar starts the native popup"),
+      "short continuation restores acceptance criteria",
+    );
+    await continuation.runHooks(
+      "session_before_compact",
+      { reason: "threshold" },
+      continuationContext,
+    );
+    await continuation.runHooks(
+      "session_compact",
+      { reason: "threshold" },
+      continuationContext,
+    );
+    assert(
+      continuation.sent
+        .at(-1)
+        ?.message.content.includes("The running UI is verified"),
+      "acceptance criteria remain available after a continuation and compaction",
+    );
+
+    const newObjective = await continuation.runHooks(
+      "before_agent_start",
+      { prompt: "Investigate a separate backup issue." },
+      continuationContext,
+    );
+    eq(
+      newObjective.at(-1),
+      undefined,
+      "a substantive new prompt starts a new task instead of inheriting old criteria",
+    );
+    await continuation.runHooks(
+      "session_before_compact",
+      { reason: "threshold" },
+      continuationContext,
+    );
+    await continuation.runHooks(
+      "session_compact",
+      { reason: "threshold" },
+      continuationContext,
+    );
+    assert(
+      continuation.sent
+        .at(-1)
+        ?.message.content.includes(
+          "Current objective: Investigate a separate backup issue.",
+        ),
+      "new task context replaces the prior objective",
+    );
+    assert(
+      !continuation.sent
+        .at(-1)
+        ?.message.content.includes("Waybar starts the native popup"),
+      "new task context excludes previous acceptance criteria",
+    );
+
+    const guiContinuation = createHarness();
+    contextCapsule.default(guiContinuation.api);
+    const guiContext = guiContinuation.makeContext();
+    await guiContinuation.runHooks("session_start", {}, guiContext);
+    await guiContinuation.runHooks(
+      "before_agent_start",
+      {
+        prompt: [
+          "Halve the PiSystem chat font and show the result in the running GUI.",
+          "## Acceptance Criteria",
+          "- The new binary is built",
+          "- The running GUI visibly uses the smaller font",
+        ].join("\n"),
+      },
+      guiContext,
+    );
+    await guiContinuation.runHooks("agent_end", { messages: [] }, guiContext);
+    const restartFollowup = await guiContinuation.runHooks(
+      "before_agent_start",
+      { prompt: "Bitte die aktuelle Sitzung neustarten von PiSystem." },
+      guiContext,
+    );
+    assert(
+      restartFollowup
+        .at(-1)
+        ?.systemPrompt.includes("Halve the PiSystem chat font"),
+      "live restart follow-up retains the original GUI task",
+    );
+    assert(
+      restartFollowup
+        .at(-1)
+        ?.systemPrompt.includes("visibly uses the smaller font"),
+      "live restart follow-up retains visual acceptance criteria",
+    );
 
     const makePending = async () => {
       const harness = createHarness();

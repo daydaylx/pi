@@ -1,7 +1,7 @@
 /**
- * Keeps a bounded, turn-local work note across successful compaction only.
- * The capsule is never written to a project file and carries no authority over
- * current workflow, permissions, recovery, or workspace state.
+ * Keeps a bounded session work note across short continuations and successful
+ * compaction. It is never written to a project file and carries no authority
+ * over current workflow, permissions, recovery, or workspace state.
  */
 import type {
   ExtensionAPI,
@@ -11,6 +11,7 @@ import { relative, resolve, sep } from "node:path";
 import {
   CAPSULE_MAX_BYTES,
   createContextCapsule,
+  extractAcceptanceCriteria,
   fieldsPresent,
   formatContextCapsule,
   serializeContextCapsule,
@@ -27,10 +28,15 @@ interface CapsuleTelemetry {
   turnGeneration: number;
 }
 
-interface ActiveTurn {
+interface ActiveWork {
   objective: string;
+  acceptanceCriteria?: string[];
   changedFiles: Set<string>;
   lastSuccessfulCheck?: string;
+  sessionGeneration: number;
+}
+
+interface ActiveTurn {
   sessionGeneration: number;
   turnGeneration: number;
 }
@@ -41,6 +47,13 @@ interface PendingCapsule {
   sessionGeneration: number;
   turnGeneration: number;
 }
+
+const CONTINUATION_PROMPTS = [
+  /^(?:(?:bitte|dann|jetzt|okay|ok)\s+)*(?:weiter(?:\s+mit\s+(?:den\s+)?(?:offenen\s+)?(?:punkten|schritten|aufgaben))?|mach(?:e)?\s+(?:bitte\s+)?weiter|mach\s+(?:das|es)(?:\s+bitte)?|fortsetzen|fortfahren|versuch(?:e)?\s+(?:es\s+)?(?:jetzt\s+)?(?:noch\s+einmal|erneut)|noch\s+einmal\s+versuchen|nochmal|continue(?:\s+with\s+the\s+remaining\s+(?:items|steps))?|try\s+again)[.!?…]*$/i,
+  /^(?:(?:dann|bitte|jetzt)\s+)*(?:übernimm(?:e)?|übernehm(?:en)?)\s+(?:das|es)(?:\s+bitte)?[.!?…]*$/i,
+  /^kannst\s+du\s+(?:bitte\s+)?(?:das|es)\s+übernehmen[.!?…]*$/i,
+  /^(?:(?:bitte|dann|jetzt)\s+)*(?:die\s+)?(?:aktuelle\s+)?sitzung\s+(?:neu\s+starten|neustarten)(?:\s+(?:von\s+)?pisystem)?[.!?…]*$/i,
+];
 
 function telemetry(
   phase: CapsuleTelemetry["phase"],
@@ -71,9 +84,33 @@ function objectiveFromPrompt(prompt: unknown): string | undefined {
   return createContextCapsule({ objective: bounded }).objective;
 }
 
+function isContinuationPrompt(prompt: unknown): boolean {
+  if (typeof prompt !== "string") return false;
+  const normalized = prompt
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("de-DE");
+  if (!normalized || normalized.length > 180) return false;
+  return CONTINUATION_PROMPTS.some((pattern) => pattern.test(normalized));
+}
+
+function capsuleForWork(work: ActiveWork): ContextCapsule {
+  return createContextCapsule({
+    objective: work.objective,
+    acceptanceCriteria: work.acceptanceCriteria,
+    changedFiles: [...work.changedFiles],
+    lastSuccessfulCheck: work.lastSuccessfulCheck,
+    nextAction: work.acceptanceCriteria?.length
+      ? "Continue the original request. Work on the first unmet acceptance criterion; verify each actual outcome before reporting completion."
+      : "Continue unfinished parts of the original request; verify their actual outcomes before reporting completion.",
+  });
+}
+
 export default function contextCapsule(pi: ExtensionAPI): void {
   let sessionGeneration = 0;
   let turnGeneration = 0;
+  let activeWork: ActiveWork | undefined;
   let activeTurn: ActiveTurn | undefined;
   let pending: PendingCapsule | undefined;
 
@@ -91,6 +128,7 @@ export default function contextCapsule(pi: ExtensionAPI): void {
     discardPending();
     sessionGeneration += 1;
     turnGeneration += 1;
+    activeWork = undefined;
     activeTurn = undefined;
     pending = undefined;
   });
@@ -101,22 +139,36 @@ export default function contextCapsule(pi: ExtensionAPI): void {
     if (event.messageType === "custom") return;
     discardPending();
     turnGeneration += 1;
+    const continuation =
+      isContinuationPrompt(event.prompt) &&
+      activeWork?.sessionGeneration === sessionGeneration;
+    if (continuation && activeWork) {
+      activeTurn = { sessionGeneration, turnGeneration };
+      return {
+        systemPrompt: formatContextCapsule(capsuleForWork(activeWork)),
+      };
+    }
+
     const objective = objectiveFromPrompt(event.prompt);
-    activeTurn = objective
+    activeWork = objective
       ? {
           objective,
+          acceptanceCriteria: extractAcceptanceCriteria(event.prompt),
           changedFiles: new Set(),
           sessionGeneration,
-          turnGeneration,
         }
       : undefined;
+    activeTurn = activeWork ? { sessionGeneration, turnGeneration } : undefined;
   });
 
   pi.on("tool_result", (event, ctx: ExtensionContext) => {
     const turn = activeTurn;
+    const work = activeWork;
     if (
       !turn ||
+      !work ||
       turn.sessionGeneration !== sessionGeneration ||
+      work.sessionGeneration !== sessionGeneration ||
       turn.turnGeneration !== turnGeneration ||
       event.isError
     )
@@ -125,7 +177,7 @@ export default function contextCapsule(pi: ExtensionAPI): void {
     const input = event.input as Record<string, unknown> | undefined;
     if (event.toolName === "edit" || event.toolName === "write") {
       const path = workspacePath(input?.path ?? input?.filePath, ctx.cwd);
-      if (path && turn.changedFiles.size < 12) turn.changedFiles.add(path);
+      if (path && work.changedFiles.size < 12) work.changedFiles.add(path);
       return;
     }
     if (event.toolName === "project_check") {
@@ -133,24 +185,23 @@ export default function contextCapsule(pi: ExtensionAPI): void {
         typeof input?.profile === "string"
           ? input.profile
           : "requested profiles";
-      turn.lastSuccessfulCheck = `project_check (${profile.slice(0, 180)}) completed`;
+      work.lastSuccessfulCheck = `project_check (${profile.slice(0, 180)}) completed`;
     }
   });
 
   pi.on("session_before_compact", () => {
     const turn = activeTurn;
+    const work = activeWork;
     if (
       !turn ||
+      !work ||
       turn.sessionGeneration !== sessionGeneration ||
-      turn.turnGeneration !== turnGeneration
+      turn.turnGeneration !== turnGeneration ||
+      work.sessionGeneration !== sessionGeneration
     )
       return;
 
-    const capsule = createContextCapsule({
-      objective: turn.objective,
-      changedFiles: [...turn.changedFiles],
-      lastSuccessfulCheck: turn.lastSuccessfulCheck,
-    });
+    const capsule = capsuleForWork(work);
     const serializedBytes = Buffer.byteLength(
       serializeContextCapsule(capsule),
       "utf8",
@@ -231,6 +282,7 @@ export default function contextCapsule(pi: ExtensionAPI): void {
     discardPending();
     sessionGeneration += 1;
     turnGeneration += 1;
+    activeWork = undefined;
     activeTurn = undefined;
     pending = undefined;
   });

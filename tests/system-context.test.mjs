@@ -477,6 +477,8 @@ async function main() {
   test("desktop fallback guidance is restricted to the system work contract", () => {
     const system = runPrompt("system", "Starte eine Anwendung").result
       .systemPrompt;
+    assert.match(system, /kurze Arbeitsvorprüfung/);
+    assert.match(system, /verfügbare Live-Prüfung/);
     assert.match(
       system,
       /Spezialfunktion ist keine allgemeine Berechtigungssperre/,
@@ -484,6 +486,7 @@ async function main() {
     assert.match(system, /einschließlich bash/);
     const project = runPrompt("project", "Hyprland Fenster").result
       .systemPrompt;
+    assert.doesNotMatch(project, /kurze Arbeitsvorprüfung/);
     assert.doesNotMatch(
       project,
       /Spezialfunktion ist keine allgemeine Berechtigungssperre/,
