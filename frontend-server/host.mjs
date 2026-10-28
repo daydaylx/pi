@@ -620,6 +620,10 @@ export class PiSystemHost {
       if (typeof id === "string")
         eventData = this.trackUiRequest(id, frame.data);
     }
+    // A client that has observed a tool start must not outrun the durable
+    // action record if the host crashes immediately afterwards.
+    if (frame.event === "tool.started")
+      this.handleRunLifecycleEvent(frame.event, eventData);
     for (const client of this.clients.values()) {
       if (!client.ready) continue;
       this.sendClientEvent(
@@ -629,7 +633,8 @@ export class PiSystemHost {
         frame.sessionId,
       );
     }
-    this.handleRunLifecycleEvent(frame.event, eventData);
+    if (frame.event !== "tool.started")
+      this.handleRunLifecycleEvent(frame.event, eventData);
   }
 
   trackUiRequest(id, data) {

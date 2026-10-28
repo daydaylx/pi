@@ -1185,3 +1185,44 @@ test("late prompt replies preserve the next reservation and unreadable ack stays
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test("host persists tool start before announcing it to clients", () => {
+  const temp = mkdtempSync(path.join(os.tmpdir(), "pi-host-start-order-"));
+  const agentDir = path.join(temp, "agent");
+  mkdirSync(agentDir, { mode: 0o700 });
+  const host = new PiSystemHost({
+    env: { HOME: temp, PI_CODING_AGENT_DIR: agentDir },
+    runtimeDir: temp,
+  });
+  try {
+    host.state = { session: { id: "test", cwd: temp } };
+    host.runStore = new RunStore({
+      runsDir: path.join(temp, "runs"),
+      hostEpoch: "test",
+    });
+    const run = host.runStore.createRun({
+      sessionId: "test",
+      message: "isolated crash test",
+    });
+    host.clients.set("test", { ready: true });
+    let sawStart = false;
+    host.sendClientEvent = (_client, event) => {
+      if (event !== "tool.started") return;
+      sawStart = true;
+      const persisted = JSON.parse(
+        readFileSync(path.join(temp, "runs", `${run.runId}.json`), "utf8"),
+      );
+      assert.equal(persisted.actions.length, 1);
+      assert.equal(persisted.actions[0].toolCallId, "crash-action");
+      assert.equal(persisted.actions[0].effectState, "executing");
+    };
+    host.handleBackendFrame({
+      kind: "event",
+      event: "tool.started",
+      data: { toolCallId: "crash-action", toolName: "bash" },
+    });
+    assert.equal(sawStart, true);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
