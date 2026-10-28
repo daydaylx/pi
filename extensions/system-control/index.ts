@@ -646,7 +646,7 @@ export default function systemControlExtension(pi: ExtensionAPI): void {
       name: "system_state_verify",
       label: "Systemziel unabhängig prüfen",
       description:
-        "Independently read the requested user-service state, active Hyprland workspace, or running NixOS store path. Use after the matching typed mutation. A restart additionally requires a changed invocation observed by the host. Supply expectedSystem to nixos_apply to bind its exact generation goal. Arbitrary shell actions are not covered. Derive expectations from the user's goal, never from the observed state.",
+        "Independently read the requested user-service state, focused Hyprland window, active workspace, or running NixOS store path. Use after the matching typed mutation. A restart additionally requires a changed invocation observed by the host. Supply expectedSystem to nixos_apply to bind its exact generation goal. Arbitrary shell actions are not covered. Derive expectations from the user's goal, never from the observed state.",
       parameters: Type.Union([
         strictObject({
           kind: Type.Literal("user-service"),
@@ -656,6 +656,10 @@ export default function systemControlExtension(pi: ExtensionAPI): void {
             Type.Literal("stop"),
             Type.Literal("restart"),
           ]),
+        }),
+        strictObject({
+          kind: Type.Literal("focused-window"),
+          address: Type.String({ pattern: ADDRESS.source }),
         }),
         strictObject({
           kind: Type.Literal("workspace"),

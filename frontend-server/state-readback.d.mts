@@ -4,6 +4,7 @@ export type SystemStateGoal =
       unit: string;
       operation: "start" | "stop" | "restart";
     }
+  | { kind: "focused-window"; address: string }
   | { kind: "workspace"; workspace: number }
   | { kind: "nixos-generation"; expectedSystem: string };
 
@@ -12,11 +13,13 @@ export function systemGoalForTool(
   toolName: string,
   args?: Record<string, unknown>,
 ): SystemStateGoal | undefined;
+export function legacyStateGoalEvent<T>(data: T): T;
 export function readSystemGoal(value: unknown): {
   passed: boolean;
   observation: {
     activeState?: string;
     invocationId?: string;
+    address?: string;
     workspace?: number;
     currentSystem?: string;
   };

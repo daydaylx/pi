@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 
+const WINDOW_ADDRESS = /^0x[0-9a-fA-F]{1,16}$/;
 const UNIT = /^(?!-)[A-Za-z0-9_.@:-]{1,120}\.service$/;
 const SYSTEM = /^\/nix\/store\/[a-z0-9]{32}-nixos-system-[A-Za-z0-9+._-]+$/;
 const JOB = /^pi-job-[0-9a-f-]{36}$/;
@@ -107,6 +108,13 @@ export function normalizeSystemGoal(value) {
   )
     return { kind: value.kind, unit: value.unit, operation: value.operation };
   if (
+    value.kind === "focused-window" &&
+    keys === "address,kind" &&
+    typeof value.address === "string" &&
+    WINDOW_ADDRESS.test(value.address)
+  )
+    return { kind: value.kind, address: value.address.toLowerCase() };
+  if (
     value.kind === "workspace" &&
     keys === "kind,workspace" &&
     Number.isInteger(value.workspace) &&
@@ -132,6 +140,11 @@ export function systemGoalForTool(toolName, args = {}) {
         unit: args.unit,
         operation: args.action,
       });
+    if (toolName === "desktop_focus_window")
+      return normalizeSystemGoal({
+        kind: "focused-window",
+        address: args.address,
+      });
     if (toolName === "desktop_switch_workspace")
       return normalizeSystemGoal({ kind: "workspace", workspace: args.n });
     if (toolName === "nixos_apply" && args.expectedSystem)
@@ -143,6 +156,22 @@ export function systemGoalForTool(toolName, args = {}) {
     /* Invalid arguments cannot acquire a verification target. */
   }
   return undefined;
+}
+
+// Older protocol-v1 peers reject new goal variants. Keep this metadata on the
+// private bridge/host connection and omit it from legacy-facing events.
+export function legacyStateGoalEvent(data) {
+  if (!data || typeof data !== "object") return data;
+  if (
+    data.systemTarget?.kind !== "focused-window" &&
+    data.stateGoalCheck?.kind !== "focused-window"
+  )
+    return data;
+  const copy = { ...data };
+  if (copy.systemTarget?.kind === "focused-window") delete copy.systemTarget;
+  if (copy.stateGoalCheck?.kind === "focused-window")
+    delete copy.stateGoalCheck;
+  return copy;
 }
 
 export function readSystemGoal(value, options = {}) {
@@ -179,6 +208,20 @@ export function readSystemGoal(value, options = {}) {
         invocationId: fields.InvocationID,
       },
       source: `systemd-user:${goal.unit}`,
+    };
+  }
+  if (goal.kind === "focused-window") {
+    const window = JSON.parse(run("hyprctl", ["-j", "activewindow"]));
+    if (
+      typeof window?.address !== "string" ||
+      !WINDOW_ADDRESS.test(window.address)
+    )
+      throw new Error("Invalid active window readback");
+    const address = window.address.toLowerCase();
+    return {
+      passed: address === goal.address,
+      observation: { address },
+      source: "hyprland:activewindow",
     };
   }
   if (goal.kind === "workspace") {

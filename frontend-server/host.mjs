@@ -19,7 +19,7 @@ import {
   protocolError,
 } from "../npm/packages/frontend-protocol/dist/index.js";
 import { RunStore, TERMINAL_RUN_STATES, toPublicRunSnapshot } from "./runs.mjs";
-import { releaseApplyJob } from "./state-readback.mjs";
+import { legacyStateGoalEvent, releaseApplyJob } from "./state-readback.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_FRONTEND = path.join(ROOT, "bin", "pi-frontend");
@@ -350,6 +350,7 @@ export class PiSystemHost {
       PI_SYSTEM_SESSION_DIR: profile.sessions,
       PI_LAUNCH_PROFILE: "system",
       PI_FRONTEND_PI_PATH: runtimePath,
+      PI_FRONTEND_INTERNAL_STATE_GOALS: "1",
     };
     this.frontendPath = frontendPath;
     this.promptStartGraceMs = promptStartGraceMs;
@@ -621,7 +622,12 @@ export class PiSystemHost {
     }
     for (const client of this.clients.values()) {
       if (!client.ready) continue;
-      this.sendClientEvent(client, frame.event, eventData, frame.sessionId);
+      this.sendClientEvent(
+        client,
+        frame.event,
+        legacyStateGoalEvent(eventData),
+        frame.sessionId,
+      );
     }
     this.handleRunLifecycleEvent(frame.event, eventData);
   }

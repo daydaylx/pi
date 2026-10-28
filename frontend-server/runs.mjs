@@ -676,6 +676,7 @@ export class RunStore {
       // Do not let a target for another tool grant coverage to shell commands.
       const supported = {
         "user-service": "user_service",
+        "focused-window": "desktop_focus_window",
         workspace: "desktop_switch_workspace",
         "nixos-generation": "nixos_apply",
       };

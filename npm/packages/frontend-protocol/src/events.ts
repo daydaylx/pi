@@ -25,6 +25,13 @@ const SystemStateGoal = Type.Union([
   ),
   Type.Object(
     {
+      kind: Type.Literal("focused-window"),
+      address: Type.String({ pattern: "^0x[0-9a-fA-F]{1,16}$" }),
+    },
+    Strict,
+  ),
+  Type.Object(
+    {
       kind: Type.Literal("workspace"),
       workspace: Type.Integer({ minimum: 1, maximum: 99 }),
     },

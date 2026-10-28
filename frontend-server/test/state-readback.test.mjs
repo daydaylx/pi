@@ -12,7 +12,8 @@ import {
 } from "../state-readback.mjs";
 import { RunStore } from "../runs.mjs";
 import { PiSystemHost } from "../host.mjs";
-import { mapRuntimeEvent } from "../index.mjs";
+import { FrontendServer, mapRuntimeEvent } from "../index.mjs";
+import { Writable } from "node:stream";
 import { isValidEventData } from "../../npm/packages/frontend-protocol/dist/index.js";
 
 const service = {
@@ -493,6 +494,182 @@ test("the host repeats the state probe after a real mapped verification event", 
     observed = 3;
     assert.equal(execute("false-tool-claim").state, "FAILED");
     assert.equal(probes, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("focused-window readback binds the latest focus action to the observed address", () => {
+  const goal = { kind: "focused-window", address: "0xabc" };
+  assert.deepEqual(
+    systemGoalForTool("desktop_focus_window", { address: "0xABC" }),
+    goal,
+  );
+  assert.equal(
+    systemGoalForTool("desktop_focus_window", { address: "0xabc;evil" }),
+    undefined,
+  );
+  assert.throws(() => normalizeSystemGoal({ ...goal, passed: true }));
+  const observe = (address) =>
+    readSystemGoal(goal, {
+      exec: (file, args) => {
+        assert.equal(file, "/run/current-system/sw/bin/hyprctl");
+        assert.deepEqual(args, ["-j", "activewindow"]);
+        return JSON.stringify({ address });
+      },
+    });
+  assert.equal(observe("0xABC").passed, true);
+  assert.equal(observe("0xdef").passed, false);
+  assert.throws(() => observe(""), /Invalid active window/);
+  const event = mapRuntimeEvent(
+    {
+      type: "tool_execution_start",
+      toolName: "desktop_focus_window",
+      toolCallId: "focus",
+      args: { address: "0xABC" },
+    },
+    1,
+  );
+  assert.deepEqual(event.data.systemTarget, goal);
+  assert.equal(isValidEventData(event.event, event.data), true);
+  const dir = mkdtempSync(path.join(os.tmpdir(), "pi-focus-proof-"));
+  try {
+    let observed = "0xabc";
+    const store = new RunStore({
+      runsDir: dir,
+      hostEpoch: "test",
+      stateReader: (target) =>
+        readSystemGoal(target, {
+          exec: () => JSON.stringify({ address: observed }),
+        }),
+    });
+    const run = store.createRun({
+      sessionId: "isolated",
+      message: "focus target",
+    });
+    store.recordToolStarted(run, {
+      toolCallId: "focus",
+      toolName: "desktop_focus_window",
+      systemTarget: goal,
+    });
+    store.recordToolFinished(run, {
+      toolCallId: "focus",
+      toolName: "desktop_focus_window",
+      isError: false,
+    });
+    store.settleTurn(run);
+    assert.equal(run.state, "VERIFYING");
+    store.verifySystemReadback(run, {
+      goal: { kind: "focused-window", address: "0xdef" },
+      checkId: "wrong-target",
+    });
+    assert.notEqual(run.state, "SUCCEEDED");
+    assert.equal(run.verification.at(-1).status, "failed");
+    const stale = store.createRun({
+      sessionId: "isolated",
+      message: "focus twice",
+    });
+    for (const [id, target] of [
+      ["first", goal],
+      ["second", { ...goal, address: "0xdef" }],
+    ]) {
+      store.recordToolStarted(stale, {
+        toolCallId: id,
+        toolName: "desktop_focus_window",
+        systemTarget: target,
+      });
+      store.recordToolFinished(stale, {
+        toolCallId: id,
+        toolName: "desktop_focus_window",
+        isError: false,
+      });
+    }
+    store.settleTurn(stale);
+    store.verifySystemReadback(stale, { goal, checkId: "stale-target" });
+    assert.equal(stale.state, "VERIFYING");
+    assert.equal(stale.verification.at(-1).status, "pending");
+    const forged = store.createRun({
+      sessionId: "isolated",
+      message: "opaque command",
+    });
+    store.recordToolStarted(forged, {
+      toolCallId: "shell",
+      toolName: "bash",
+      systemTarget: goal,
+    });
+    assert.equal(forged.actions.at(-1).systemTarget, undefined);
+    const correct = store.createRun({
+      sessionId: "isolated",
+      message: "focus target",
+    });
+    store.recordToolStarted(correct, {
+      toolCallId: "focus2",
+      toolName: "desktop_focus_window",
+      systemTarget: goal,
+    });
+    store.recordToolFinished(correct, {
+      toolCallId: "focus2",
+      toolName: "desktop_focus_window",
+      isError: false,
+    });
+    store.settleTurn(correct);
+    store.verifySystemReadback(correct, { goal, checkId: "right-target" });
+    assert.equal(correct.state, "SUCCEEDED");
+    assert.equal(correct.verification.at(-1).proofKind, "host-system-state");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("focused-window metadata stays on the private host bridge for old v1 clients", () => {
+  const goal = { kind: "focused-window", address: "0xabc" };
+  const data = {
+    toolCallId: "focus",
+    toolName: "desktop_focus_window",
+    systemTarget: goal,
+  };
+  const events = [];
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      events.push(JSON.parse(chunk.toString()));
+      callback();
+    },
+  });
+  const legacy = new FrontendServer({ output, env: {} });
+  legacy.emit("tool.started", data);
+  assert.deepEqual(events.pop().data, {
+    toolCallId: "focus",
+    toolName: "desktop_focus_window",
+  });
+  const bridge = new FrontendServer({
+    output,
+    env: { PI_FRONTEND_INTERNAL_STATE_GOALS: "1" },
+  });
+  bridge.emit("tool.started", data);
+  assert.deepEqual(events.pop().data, data);
+  const dir = mkdtempSync(path.join(os.tmpdir(), "pi-focus-compat-"));
+  try {
+    mkdirSync(path.join(dir, "agent"), { mode: 0o700 });
+    const host = new PiSystemHost({
+      runtimeDir: dir,
+      env: { HOME: dir, PI_CODING_AGENT_DIR: path.join(dir, "agent") },
+    });
+    host.clients.set("client", { ready: true });
+    let sent;
+    let internal;
+    host.sendClientEvent = (_client, _event, payload) => {
+      sent = payload;
+    };
+    host.handleRunLifecycleEvent = (_event, payload) => {
+      internal = payload;
+    };
+    host.handleBackendFrame({ kind: "event", event: "tool.started", data });
+    assert.deepEqual(sent, {
+      toolCallId: "focus",
+      toolName: "desktop_focus_window",
+    });
+    assert.deepEqual(internal, data);
+    assert.equal(host.env.PI_FRONTEND_INTERNAL_STATE_GOALS, "1");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

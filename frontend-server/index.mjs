@@ -15,7 +15,7 @@ import {
 import path, { extname } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { SessionManager } from "../npm/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
-import { systemGoalForTool } from "./state-readback.mjs";
+import { legacyStateGoalEvent, systemGoalForTool } from "./state-readback.mjs";
 import {
   CAPABILITIES,
   PROTOCOL_PACKAGE_VERSION,
@@ -1222,6 +1222,8 @@ export class FrontendServer {
   }
 
   emit(event, data) {
+    if (this.env.PI_FRONTEND_INTERNAL_STATE_GOALS !== "1")
+      data = legacyStateGoalEvent(data);
     if (!isKnownEventName(event) || !isValidEventData(event, data)) {
       if (event === "error") return;
       const error = protocolError(
